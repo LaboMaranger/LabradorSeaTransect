@@ -1,0 +1,1154 @@
+---
+title: "Script"
+author: "Richard LaBrie"
+date: "4 juillet 2019"
+output: html_document
+---
+
+```{r}
+#Load required data, libraries and functions
+
+#Data
+Indice.OTU = read.csv("../Input/Indice.ASV.hetero132.csv", header=T, row.names = 1)
+Chimie = read.csv("../Input/Chimie.csv", header=T, row.names = 1, sep = ";")
+Metadata = read.csv("../Input/samdf_bact_transect.csv", header=T, sep=";")
+Free.OTU.hetero = read.csv("../Input/WorkingASV132.cor.csv", row.names = 1)
+SPAD.hetero = read.csv("../Input/SPAD.hetero.Vec.csv", row.names=1)
+WorkingTaxoTransect.free.hetero = read.csv("../Input/WorkingTaxo132.hetero.csv", header=T, row.names = 1)
+
+#Libraries
+library("extrafont")
+library(vegan)
+
+#Functions
+log_tick_marks <- function(min,max){
+ nsplit <- abs(round(log10(max-min)))
+ i <- 0
+ nurange <- c()
+ while(i<=nsplit) {
+   nurange <- c(nurange,sapply(1:10,function(x) x*(10^i)))
+   i <- i+1;
+ }
+ nurange
+}
+
+```
+
+```{r}
+#Transform data
+
+WorkID = Metadata[Metadata$Living == "free", "EnvID"]
+WorkChimie = Chimie[rownames(Chimie) %in% WorkID,]
+WorkChimie$Watermass = factor(WorkChimie$Watermass, levels = c("LSS", "CLB", "GSS"))
+WorkChimie = WorkChimie[order(rownames(WorkChimie), decreasing = F),]
+attach(WorkChimie)
+attach(Indice.OTU)
+Indice.OTU = Indice.OTU[,c(1,2,3,5,6,7,4,8,9)]
+
+DON = TDN_uMN - (NO3 + NO2 + NH4)
+P_Peak_T = Peak_T / (Peak_AC + Peak_B + Peak_D + Peak_M + Peak_T) * 100
+
+
+#Change names of SPAD
+unique(rownames(SPAD.hetero) == colnames(Free.OTU.hetero))
+colnames(SPAD.hetero) = "Distribution"
+SPAD.hetero$Distribution = as.character(SPAD.hetero$Distribution)
+SPAD.hetero$Distribution[SPAD.hetero$Distribution == "Lognormal"] <- "Logistique"
+SPAD.hetero$Distribution = as.factor(SPAD.hetero$Distribution)
+
+#Merge OTUs at the class level
+
+# Author Nicolas FOrtin St-Gelais
+# where m=community matrix (cols = taxa, rows = sites)
+# c= a vertor with the selected taxonomic level for agregation and OTU as name
+mergeByCat<- function(m,c){
+  c=c[!is.na(c)]
+  c=c[names(c)%in%colnames(m)]
+  m=m[,names(c)]
+  mergedM=matrix(NA,nrow(m),length(unique(c)),dimnames=list(rownames(m),unique(c)))
+  for(i in unique(c)){
+    mergedM[,i]=rowSums(m[,c%in%as.character(i),drop=F])}
+  return(mergedM)
+}
+
+#Author Greg Snow
+shadowtext <- function(x, y=NULL, labels, col='white', bg='black',
+	theta= seq(pi/4, 2*pi, length.out=8), r=0.1, ... )
+{
+	xy <- xy.coords(x,y)
+	xo <- r*strwidth('A')
+	yo <- r*strheight('A')
+	for (i in theta)
+	{
+	  text(xy$x + cos(i)*xo, xy$y + sin(i)*yo,labels, col=bg, ... )
+	}
+	text(xy$x, xy$y, labels, col=col, ... )
+}
+
+# #Save colnames
+# col.temp = colnames(WorkingTaxoTransect.free.hetero)
+# #Add a column to get an easy sorting of OTU
+# WorkingTaxoTransect.free.hetero = cbind(1, WorkingTaxoTransect.free.hetero)
+# colnames(WorkingTaxoTransect.free.hetero) = c("OTU", col.temp)
+# WorkingTaxoTransect.free.hetero[,1] = paste0("OTU",seq(1,dim(WorkingTaxoTransect.free.hetero)[1]))
+WorkingTaxoTransect.free.hetero = cbind(1, WorkingTaxoTransect.free.hetero)
+WorkingTaxoTransect.free.hetero[,1] = colnames(Free.OTU.hetero)
+
+#Create a workable matrix name and change colnames to match Taxonomy table
+m = Free.OTU.hetero
+colnames(m) = WorkingTaxoTransect.free.hetero[,1]
+
+class = WorkingTaxoTransect.free.hetero[,"Class"]
+names(class) = WorkingTaxoTransect.free.hetero[,1]
+
+class.OTU = mergeByCat(m, class)
+
+Order = WorkingTaxoTransect.free.hetero[,"Order"]
+names(Order) = WorkingTaxoTransect.free.hetero[,1]
+
+order.OTU = mergeByCat(m, Order)
+
+Family = WorkingTaxoTransect.free.hetero[,"Family"]
+names(Family) = WorkingTaxoTransect.free.hetero[,1]
+
+family.OTU = mergeByCat(m, Family)
+```
+
+```{r}
+#Graphical parameters
+#Parametre graphique
+#Couleur
+bg.indice = as.character(Metadata[which(Metadata$Living == "free"),"Year"])
+bg.indice[bg.indice == "2014"] = "Grey50" #Vert
+bg.indice[bg.indice == "2015"] = "White" #Jaune
+bg.indice[bg.indice == "2016"] = "Black" #Rouge
+
+bg.indice.col = as.character(Metadata[which(Metadata$Living == "free"),"Year"])
+bg.indice.col[bg.indice.col == "2014"] = "#C7144C" #Rouge
+bg.indice.col[bg.indice.col == "2015"] = "#33a02c" #Vert
+bg.indice.col[bg.indice.col == "2016"] = "#FFD700" #Jaune
+
+#pch
+pch.indice = as.character(Metadata[which(Metadata$Living == "free"),"Watermass"])
+pch.indice[pch.indice == "LSS"] = 21
+pch.indice[pch.indice == "CLB"] = 22
+pch.indice[pch.indice == "GSS"] = 24
+pch.indice = as.numeric(pch.indice)
+```
+
+#Fig 2
+```{r}
+#High level DOM-Bact.Comm-Metabolism relationships
+abond.graph = (Abundance - class.OTU[,1]) / 1000
+abond.graph.SAR = (Abundance - order.OTU[,1]) / 1000
+
+
+Abond.Chla.lm <- lm(log10(abond.graph) ~ log10(Chla)) #R2 = 0.31
+Abond.Chla.lm.SAR <- lm(log10(abond.graph.SAR) ~ log10(Chla)) #R2=0.37
+summary(lm(log10(BR) ~ log10(Chla)))
+summary(lm(log10(Abundance) ~ log10(Chla)))
+summary(lm(log10(BP) ~ log10(abond.graph.SAR*1000)))
+
+{
+png("../Output/Fig 2.png", width = 9, height = 7, units = "in", res = 300)
+#pdf("../Output/Fig 2.pdf", family = "ArialMT", width = 9, height = 7)
+par(mfrow = c(2,2))
+par(mar = c(5, 6, 3, 2) + 0.1)
+
+plot(BP ~ Chla, las = 1,
+     ylab = "",
+     xlab = expression(Chlorophyll ~ italic(a) ~ (mg ~ m^{-3})),
+     log = "xy",
+     xaxt = "n",
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(1,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(0.1, 1, 10), tck = -0.04, cex = 1.3)
+axis(1, at = c(0.3), labels = "0.3", cex = 1.3)
+
+axis(2, log_tick_marks(1,100)/1000,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.01, 0.1), tck = -0.04, las =1, cex = 1.3)
+
+mtext(text = expression(PHP ~ (mu * M ~ C ~ L^{-1} ~ d^{-1})), side = 2, line = 3.5)
+abline(lm(log10(BP) ~ log10(Chla)), lwd = 2)
+mtext(text = "a", side = 3, adj = 1, at = 0.25)
+
+legend("bottomright",
+       pch=c(21, 21, 21, 21, 22, 23),
+       paste(c("2014", "2015", "2016", "LS", "CB", "GS")),
+       ncol=1,
+       pt.bg = c("Grey50", "White", "Black", "white", "white", "white"))
+
+plot(BR ~ BP, las = 1,
+     ylab = "",
+     xlab = expression(PHP ~ (mu * M ~ C ~ L^{-1} ~ d^{-1})),
+     log = "xy",
+     xaxt = "n",
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(1,100)/1000,FALSE, TRUE, NA, NA)
+axis(1, at = c(0.01, 0.1), tck = -0.04, cex = 1.3)
+
+axis(2, log_tick_marks(0.1,10)/10,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.1, 1), tck = -0.04, las = 1, cex = 1.3)
+axis(2, at = c(4), labels = "4.0", las = 1, cex = 1.3)
+
+mtext(text = expression(PR ~ (mu * M ~ C ~ L^{-1} ~ d^{-1})), side = 2, line = 3.5)
+abline(lm(log10(BR) ~ log10(BP)), lwd = 2)
+mtext(text = "b", side = 3, adj = 1, at = 0.0035)
+
+plot(abond.graph.SAR ~ Chla, las = 1,
+     ylab = "",
+     xlab = expression(Chlorophyll ~ italic(a) ~ (mg ~ m^{-3})),
+     log = "xy",
+     xaxt = "n",
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(1, 10), tck = -0.04, cex = 1.3)
+axis(1, at = c(0.3), cex = 1.3)
+
+axis(2, log_tick_marks(10,100),FALSE, TRUE, NA, NA)
+axis(2, at = c(10,100), tck = -0.04, cex = 1.3, las = 1)
+axis(2, at = c(40,400), cex = 1.3, las = 1)
+
+mtext(text = expression(Non ~ SAR11), side = 2, line = 4.8)
+mtext(text = expression(abundance ~ (10^{3} ~ ml^{-1})), side = 2, line = 3.3)
+abline(Abond.Chla.lm.SAR, lwd = 2)
+mtext(text = "c", side = 3, adj = 1, at = 0.25)
+
+plot(BR ~ abond.graph.SAR, las = 1,
+     ylab = "",
+     xlab = expression(Non ~ SAR11 ~ abundance ~ (10^{3} ~ ml^{-1})),
+     log = "xy",
+     xaxt = "n",
+     ylim = c(0.1,4),
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+axis(1, log_tick_marks(10,100),FALSE, TRUE, NA, NA)
+axis(1, at = c(10,100), tck = -0.04, cex = 1.3)
+axis(1, at = c(40,400), cex = 1.3)
+
+axis(2, log_tick_marks(0.1,10)/10,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.1, 1), tck = -0.04, las = 1, cex = 1.3)
+axis(2, at = c(4), labels = "4.0", las = 1, cex = 1.3)
+
+mtext(text = expression(PR ~ (mu * M ~ C ~ L^{-1} ~ d^{-1})), side = 2, line = 3.5)
+abline(lm(log10(BR) ~ log10(abond.graph.SAR)), lwd = 2)
+mtext(text = "d", side = 3, adj = 1, at = 30)
+dev.off()
+}
+```
+
+#Fig 3
+```{r}
+#Mid level DOM-Bact.comm relationships
+
+NoSAR.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade" & SPAD.hetero == "Normal")] / 1000
+NoSAR.abond = rowSums(NoSAR.temp)
+Norm.T = lm(log10(NoSAR.abond) ~ P_Peak_T) #R² = 0.23 p =0.01
+
+Norm.graph = Indice.OTU$abond.norm / (10^6)
+Norm.Temp = lm(log10(Norm.graph) ~ P_Peak_T) #R² = 0.09 p =0.11
+
+NoSAR.logit = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade" & SPAD.hetero == "Logistique")] / 1000
+NoSAR.abond.logit = rowSums(NoSAR.logit)
+logit.nosar.lm = (lm(log10(NoSAR.abond.logit) ~ Peak_D)) #R² = 0.33 p = 0.001
+
+Delta.graph = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria" & SPAD.hetero == "Logistique")]/1000)
+# delta.D = (lm(log10(Delta.graph[Delta.graph>0]) ~ Peak_D[Delta.graph>0]))
+delta.M = lm(log10(Delta.graph[Delta.graph > 0 & Peak_M < 0.06]) ~ Peak_M[Delta.graph > 0 & Peak_M < 0.06]) #R² = 0.57 p 0.004
+
+logit.nosar.lm.DOC = (lm(log10(NoSAR.abond.logit[DOC<115]) ~ DOC[DOC<115])) #R²=0.29 p=0.005
+
+arom.fdom = Peak_D + Peak_M
+logit.nosar.lm.arom = (lm(log10(NoSAR.abond.logit[Peak_M < 0.06]) ~ arom.fdom[Peak_M < 0.06])) #R²=0.28 p=0.005
+
+{
+#png("../Output/Fig 3.png", width = 10, height = 4, units = "in", res = 300)
+pdf("../Output/Fig 3.pdf", family = "ArialMT", width = 10, height = 4)
+par(mfrow = c(1,3))
+par(mar = c(6, 7.3, 4, 2) + 0.1)
+plot(NoSAR.abond ~ P_Peak_T, las = 1,
+     ylab = "",
+     xlab = expression(F[lambda*em]*350~("%")),
+     log = "y",
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(2, log_tick_marks(1,100),FALSE, TRUE, NA, NA)
+axis(2, at = c(10,100), tck = -0.04, las =1, cex = 1.3)
+
+mtext(text = expression(Ubiquitous), side = 2, line = 5.5, cex = 1.3)
+mtext(text = expression(non~SAR11~(10^{3} ~ ml^{-1})), side = 2, line = 3, cex = 1.3)
+abline(Norm.T, lwd = 2)
+mtext(text = "a", side = 3, adj = 1, at = -0.5)
+
+
+plot(NoSAR.abond.logit ~ Peak_D, las = 1,
+     ylab = "",
+     xlab = expression(F[lambda*em]*492~(RU)),
+     ylim = c(10,100),
+     log = "y",
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(2, log_tick_marks(10,100),FALSE, TRUE, NA, NA)
+axis(2, at = c(10,100), tck = -0.04, las =1, cex = 1.3)
+
+mtext(text = expression(Spatially ~ constrained), side = 2, line = 5.5, cex = 1.3)
+mtext(text = expression(non~SAR11~ASVs~(10^{3}~ml^{-1})), side = 2, line = 3, cex = 1.3)
+abline(logit.nosar.lm, lwd = 2)
+mtext(text = "b", side = 3, adj = 1, at = 0.01)
+
+plot(Delta.graph[Delta.graph > 0] ~ Peak_M[Delta.graph > 0], las = 1,
+     ylab = "",
+     xlab = expression(F[lambda*em]*376~(RU)),
+     log = "y",
+     yaxt = "n",
+     xlim = c(0.01, 0.1),
+     pch = pch.indice[Delta.graph > 0],
+     bg = bg.indice[Delta.graph > 0],
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(2, log_tick_marks(1,100)/10,FALSE, TRUE, NA, NA)
+axis(2, at = c(1,10), tck = -0.04, las =1, cex = 1.3)
+axis(2, at = c(0.2), labels = "0.2", las = 1, cex = 1.3)
+
+mtext(text = expression(Spatially~constrained), side = 2, line = 5.5, cex = 1.3)
+mtext(text = expression(delta*-proteobacteria ~ (10^{3}~ml^{-1})), side = 2, line = 3.5, cex = 1.3)
+abline(delta.M, lwd = 2)
+mtext(text = "c", side = 3, adj = 1, at = 0.01)
+text(x = max(Peak_M), y = Delta.graph[which(Peak_M == max(Peak_M))], labels = "(  )")
+
+legend("bottomright",
+       pch=c(21, 21, 21, 21, 22, 23),
+       paste(c("2014", "2015", "2016", "LS", "CB", "GS")),
+       ncol=1,
+       pt.bg = c("Grey50", "White", "Black", "white", "white", "white"))
+
+dev.off()
+}
+```
+
+#Fig 4-5
+```{r}
+AA = cbind(L.Asx, D.Asx ,L.Glx, D.Glx, L.Ser, D.Ser, Thr, Gly, Arg, b.Ala, His, L.Ala, g.Aba, D.Ala, Tyr, Val, Phe, Ile, Leu, Lys)[c(1:16),]
+AA.prot = cbind(L.Asx,L.Glx, L.Ser, Thr, Gly, Arg, His, L.Ala, Tyr, Val, Phe, Ile, Leu, Lys)[c(1:16),]
+AA.names.prot = c("Asx","Glx", "Ser", "Thr", "Gly", "Arg", "His", "Ala", "Tyr", "Val", "Phe", "Ile", "Leu", "Lys")
+
+THAA = rowSums(AA.prot)
+
+
+{
+#pdf("../Output/Fig S10.pdf")
+png("../Output/Fig S10.png", width = 10, height = 10, units = "in", res=300)
+par(mfrow = c(4,4))
+for(i in 1:14) plot(AA.prot[,i] ~ THAA,
+                    xlab = "Total amino acids (nM)",
+                    ylab= paste(c("Asx", "Glx", "Ser", "Thr",
+                                  "Gly", "Arg", "His", "Ala",
+                                  "Tyr", "Val", "Phe", "Ile",
+                                  "Leu", "Lys")[i], "(nM)"),
+                    las=1,
+                    cex = 1.6,
+                    cex.axis = 1.4,
+                    cex.lab= 1.4,
+                    pch = pch.indice,
+                    bg = bg.indice)
+plot(1~1,
+     col = "white",
+     axes = F,
+     xlab = "",
+     ylab = "")
+legend("center",
+       legend = c("2014","2015","LS","CB","GS"),
+       pch = c(21, 21, 21, 22, 24),
+       pt.bg = c("Grey50", "White", "White", "White", "White"),
+       bg = "transparent",
+       cex = 1.5)
+}
+
+#High resolution Env. Comm Comp
+SPAD.temp = Free.OTU.hetero[,SPAD.hetero == "Normal"]
+NormCor <- cor(AA.prot[c(1:16),], SPAD.temp[c(1:16),], method = "spearman")
+NormCor.thaa <- cor(THAA, SPAD.temp[c(1:16),], method = "spearman")
+
+SPAD.temp = Free.OTU.hetero[,SPAD.hetero == "Bimodal"]
+BimoCor <- cor(AA.prot[c(1:16),], SPAD.temp[c(1:16),], method = "spearman")
+BimoCor.thaa <- cor(THAA, SPAD.temp[c(1:16),], method = "spearman")
+
+SPAD.temp = Free.OTU.hetero[,SPAD.hetero == "Logistique"]
+SPAD.temp = SPAD.temp[1:16,]
+#Enlever les OTU absent
+Empty.find = colSums(SPAD.temp != 0)
+Empty.index = which(Empty.find == 0)
+SPAD.temp = SPAD.temp[,-Empty.index]
+LogiCor <- cor(AA.prot[c(1:16),], SPAD.temp, method = "spearman")
+LogiCor.thaa <- cor(THAA, SPAD.temp, method = "spearman")
+
+thaa.graph = c(NormCor.thaa, BimoCor.thaa, LogiCor.thaa)
+thaa.names = c(rep("1", length(NormCor.thaa)),
+               rep("2", length(BimoCor.thaa)),
+               rep("3", length(LogiCor.thaa)))
+
+t.test(NormCor.thaa)
+t.test(BimoCor.thaa)
+t.test(LogiCor.thaa)
+
+box.SPAD = matrix(c(as.vector(NormCor.thaa),
+                    as.vector(BimoCor.thaa),
+                    as.vector(LogiCor.thaa), 
+                    rep("Ubiquitous", length(as.vector(NormCor.thaa))),
+                    rep("Bloomer", length(as.vector(BimoCor.thaa))),
+                    rep("Rare", length(as.vector(LogiCor.thaa)))),
+                  ncol=2)
+spad.sp = c(as.vector(NormCor.thaa), as.vector(BimoCor.thaa), as.vector(LogiCor.thaa))
+spad.name = c(rep("Ubiquitous", length(as.vector(NormCor.thaa))),
+                    rep("Bloomer", length(as.vector(BimoCor.thaa))),
+                    rep("Rare", length(as.vector(LogiCor.thaa))))
+#colnames(box.SPAD) = c("Spearman", "SPAD")
+spad.aov = aov(spad.sp~spad.name)
+posthoc.spad <- TukeyHSD(spad.aov, "spad.name", conf.level=0.99)
+posthoc.spad
+plot(posthoc.spad, las=1)
+
+#Composition & structure
+alpha.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" & SPAD.hetero == "Normal")]
+alpha.temp = alpha.temp[1:16,]
+NormAlphaCor <- cor(AA.prot[c(1:16),], alpha.temp, method = "spearman")
+
+#Composition & structure
+nonSAR.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" & SPAD.hetero == "Normal" & WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade" )]
+nonSAR.temp = nonSAR.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+nonSARCor <- cor(AA.prot[c(1:16),], nonSAR.temp, method = "spearman")
+
+
+Gamma.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria" & SPAD.hetero == "Normal")]
+Gamma.temp = Gamma.temp[1:16,]
+NormGammaCor <- cor(AA.prot[c(1:16),], Gamma.temp, method = "spearman")
+
+
+Flavo.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Bacteroidia" & SPAD.hetero == "Normal")]
+Flavo.temp = Flavo.temp[1:16,]
+NormFlavoCor <- cor(AA.prot[c(1:16),], Flavo.temp, method = "spearman")
+
+
+delta.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria" & SPAD.hetero == "Logistique")]
+delta.temp = delta.temp[1:16,]
+#Enlever les OTU absent
+Empty.find = colSums(delta.temp != 0)
+Empty.index = which(Empty.find == 0)
+delta.temp = delta.temp[,-Empty.index]
+LogitDeltaCor <- cor(AA.prot[c(1:16),], delta.temp, method = "spearman")
+
+
+
+#Composition & structure
+alpha.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria")]
+alpha.temp = alpha.temp[1:16,]
+alphaCor <- cor(THAA, alpha.temp, method = "spearman")
+
+
+gamma.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria")]
+gamma.temp = gamma.temp[1:16,]
+gammaCor <- cor(THAA, gamma.temp, method = "spearman")
+
+
+Flavo.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Bacteroidia")]
+Flavo.temp = Flavo.temp[1:16,]
+FlavoCor <- cor(THAA, Flavo.temp, method = "spearman")
+
+
+delta.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria")]
+delta.temp = delta.temp[1:16,]
+#Enlever les OTU absent
+Empty.find = colSums(delta.temp != 0)
+Empty.index = which(Empty.find == 0)
+delta.temp = delta.temp[,-Empty.index]
+deltaCor <- cor(THAA, delta.temp, method = "spearman")
+
+taxo.thaa.graph = c(alphaCor, gammaCor, FlavoCor, deltaCor)
+taxo.thaa.names = c(rep("1", length(alphaCor)),
+               rep("2", length(gammaCor)),
+               rep("3", length(FlavoCor)),
+               rep("4", length(deltaCor)))
+
+t.test(alphaCor)
+t.test(gammaCor)
+t.test(FlavoCor)
+t.test(deltaCor)
+
+{
+#png("../Output/Fig 4.png",  width = 15, height = 6, units = "in", res = 300)
+pdf("../Output/Fig 4.pdf",  width = 8, height = 6, family = "ArialMT")
+  par(mar = c(3, 6, 4, 1) + 0.1)
+  par(mfrow=c(2,1))
+  boxplot(thaa.graph ~ thaa.names, 
+        ylim = c(-1,1),
+        xlab = "",
+        ylab = "",
+        names = c("Ubiquitous", "Bloomer", "Spatially constrained"),
+        las = 1,
+        cex.lab = 1.4,
+        cex.axis = 1.4,
+        cex.main = 1.4)
+  abline(h=0, col = "Grey50", lwd = 2)
+  mtext(text = "Spearman correlation coefficient", side =2, line = 3.5, cex = 1.4)
+  mtext(text = "a", side = 3, adj = 1, at = -0.5)
+  
+  boxplot(taxo.thaa.graph ~ taxo.thaa.names, 
+        ylim = c(-1,1),
+        xlab = "",
+        ylab = "",
+        names = c(expression(alpha~-proteo), expression(gamma~-proteo), "Bacteroidia", expression(delta~-proteo)),
+        las = 1,
+        cex.lab = 1.4,
+        cex.axis = 1.4,
+        cex.main = 1.4)
+  abline(h=0, col = "Grey50", lwd = 2)
+  #mtext(text = "Spearman correlation coefficient", side =2, line = 3.5, cex = 1.4)
+  mtext(text = "b", side = 3, adj = 1, at = -0.5)
+dev.off()
+}
+
+{
+#png("../Output/Fig 5.png",  width = 15, height = 12, units = "in", res = 300)
+pdf("../Output/Fig 5.pdf",  width = 13, height = 12, family = "ArialMT")
+par(mfrow = c(2,2))
+par(mar = c(8, 6, 4, 1) + 0.1)
+
+boxplot(NormAlphaCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Ubiquitous ~ alpha*-proteobacteria),
+        names = c("SAR11-Ia_1", "SAR11-Ia_11", "ASV14", "ASV19", "Plankto_21", "ASV24", "OCS116_36", "Plankto_38", "SAR11-III_42", "SAR116_46", "SAR11-Ib_50", "SAR11-Ia_74"),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "a", side = 3, adj = 1, at = -0.5)
+abline(h=0, col = "Grey50", lwd = 2)
+
+boxplot(NormGammaCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Ubiquitous ~ gamma*-proteobacteria),
+        names = c("Thio_7", "SAR92_10", "Nitrin_16", "SAR86_33"),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "b", side = 3, adj = 1, at = 0)
+abline(h=0, col = "Grey50", lwd = 2)
+
+boxplot(NormFlavoCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Ubiquitous ~ Bacteroidia),
+        names = c("Polari_4", "Ulvi_12", "Formosa_13", "Auran_20", "Formosa_23", "NS2b_26", "NS9_30", "NS9_35", "NS2b_37", "NS5_49"),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "c", side = 3, adj = 1, at = 0)
+abline(h=0, col = "Grey50", lwd = 2)
+
+boxplot(LogitDeltaCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Spatially~constrained ~ delta*-proteobacteria),
+        names = paste0("SAR324_",c(150, 223, 360, 425)),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "d", side = 3, adj = 1, at = 0)
+abline(h=0, col = "Grey50", lwd = 2)
+dev.off()
+}
+
+```
+
+#Fig 1
+```{r}
+#Load data for pca
+pca.data = read.table("../Input/MetaboPostImput.csv",sep = ";", header=T)
+Workpca = pca.data[pca.data$ID %in% WorkID,]
+rownames(Workpca) = pca.data$ID[pca.data$ID %in% WorkID]
+Workpca$Watermass = factor(Workpca$Watermass, levels = c("LSS", "CLB", "GSS"))
+Match = read.csv("../Input/MatchingSite.csv")
+#Change the order of Workpca to fit Match
+Workpca = Workpca[order(match(Workpca$ID,Match$ID)),]
+
+P_Peak_D = Peak_D / (Peak_AC + Peak_B + Peak_D + Peak_M + Peak_T) * 100
+Workpca = cbind(Workpca, P_Peak_D)
+
+#Parameters for the PCA
+sc=3
+env_sel= c("NO3","P_Peak_D","C_AA_yields","Peak_T","DON", "Salinity")
+log_env_sel = c("Peak_D","N_AA_yields","Peak_B","DOC","Chla")
+meta_sel = c("BP","TR")
+
+Logworkpca = cbind(Workpca[,env_sel], log(Workpca[,log_env_sel]))
+#Do the pca
+pca=rda(Logworkpca,scale=T)
+a = summary(pca)
+
+#Project metabolism and community composition
+enviro_meta = envfit(pca,log(Workpca[,meta_sel]))
+enviro_com = envfit(pca,cbind(log(class.OTU[,c(1,2,3,5)]+1),
+                              Logistic = log(Indice.OTU$abond.logit),
+                              Bimodal = Indice.OTU$abond.bi,
+                              Norm = log(Indice.OTU$abond.norm)))
+
+{
+#png("../Graphique/Exploration/Temp/Fig 1.png", width = 9.8, height = 5.6, units = "in", res = 300)
+pdf("../Output/Fig 1.pdf", width = 9.8, height = 5.6)
+plot(0,0,
+     type="n",
+     xlab=paste0("PC1 (",round(a$cont$importance[2,1],2)*100,"% explained)"),
+     ylab=paste0("PC2 (",round(a$cont$importance[2,2],2)*100,"% explained)"),
+     xlim = c(-1.5, 2),
+     ylim = c(-1.6, 1.6),
+     las = 1)
+abline(h = 0, lty = 3, col = "black")
+abline(v = 0, lty = 3, col = "black")
+
+# plot sites
+#points(scores(pca,display="sites",scaling=sc)[,1:2],pch=grPch,cex=1.5)
+points(x = scores(pca,display="sites",scaling=sc)[,1],
+       y = scores(pca,display="sites",scaling=sc)[,2]*-1,
+       type = "p",
+       pch = pch.indice,
+       bg = bg.indice)
+
+# plot species (red cross OR text)
+#points(scores(rda,c(1,2),display="species",scaling=sc),pch=3,cex=0.8,lwd=2,col="red")
+
+text(x = scores(pca,display="species",scaling=sc)[,1],
+     y = scores(pca,display="species",scaling=sc)[,2]*-1,
+     labels = c(expression(NO[3]),
+                expression(F[lambda*em]*492~"(%)"),
+                expression(C~aa~yields), 
+                expression(F[lambda*em]*350),
+                expression(DON),
+                expression(Salinity),
+                expression(F[lambda*em]*492),
+                expression(N~aa~yields),
+                expression(F[lambda*em]*308),
+                expression(DOC),
+                expression(Chlorophyll~italic(a))), #rownames(scores(pca,c(1,2),display="species")
+     col = "Black") #de4307
+
+arrows(x0 = 0,
+       y0 = 0,
+       x1 = scores(pca,display="species",scaling=sc)[,1],
+       y1 = scores(pca,display="species",scaling=sc)[,2]*-1,
+       col = "Black")
+
+m=1
+arrows(0,0,
+       enviro_meta$vectors$arrows[,1]*m,
+       enviro_meta$vectors$arrows[,2]*m*-1,
+       length=0.07,
+       lwd = 4,
+       col = "black")
+
+shadowtext(enviro_meta$vectors$arrows[,1]*m,
+     enviro_meta$vectors$arrows[,2]*m*-1,
+     labels = c("PHP", "PR"),
+     col = "White")
+#text(enviro_meta$vectors$arrows[,1]*m,
+#     enviro_meta$vectors$arrows[,2]*m,
+#     labels = rownames(enviro_meta$vectors$arrows),
+#     col="Grey70",
+#     font = 2) #194f90
+
+
+m=0.5
+arrows(0,0,
+       enviro_com$vectors$arrows[,1]*m,
+       enviro_com$vectors$arrows[,2]*m*-1,
+       length=0.07,
+       lty = 5,
+       col = "Grey50")
+
+text(enviro_com$vectors$arrows[,1]*m,
+     enviro_com$vectors$arrows[,2]*m*-1,
+     labels = c(expression(alpha*-proteo),
+                expression(gamma*-proteo),
+                "Bacteroidia",
+                expression(delta*-proteo),
+                "Spatially constrained",
+                "Bloomer",
+                "Ubiquitous"), #rownames(enviro_com$vectors$arrows)
+     col="Grey50") #71a338
+
+legend("bottomleft",
+       legend = c("Environment","Metabolism","Community"),
+       text.col=c("Black","Grey75","Grey50"),
+       bg="transparent")
+
+legend("bottomright",
+       legend = c("2014", "2015", "2016","LS","CB","GS"),
+       pch = c(21, 21, 21, 21, 22, 24),
+       pt.bg = c("Grey50", "White", "Black", "White", "White", "White"),
+       bg = "transparent")
+shadowtext(x = -1,
+           y = 1.5,
+           labels = "Metabolism",
+           col = "White")
+dev.off()}
+```
+
+#DOC-FDOM (might remove)
+```{r}
+
+DOC_D.lm <- lm(log10(Peak_D[DOC < 115]) ~ log10(DOC[DOC < 115]))
+DOC_AC.lm <- lm(log10(Peak_AC[DOC < 115]) ~ log10(DOC[DOC < 115]))
+DOC_M.lm <- lm(log10(Peak_M[DOC < 115& Peak_M < 0.08]) ~ log10(DOC[DOC < 115 & Peak_M < 0.08]))
+DOC_T.lm <- lm(log10(Peak_T[DOC < 115 & Peak_T > 0]) ~ log10(DOC[DOC < 115 & Peak_T > 0]))
+DOC_B.lm <- lm(log10(Peak_B[DOC < 115]) ~ log10(DOC[DOC < 115]))
+
+png("../Graphique/Exploration/Temp/Fig S4_col.png")
+#pdf("../Graphique/Exploration/Temp/Fig S4_col.pdf")
+par(mfrow = c(2,3))
+par(mar = c(6, 7, 4, 2) + 0.1)
+#Peak_D
+plot(DOC, Peak_D, las = 1,
+     ylab = expression(F[lambda*em]*492~(RU)),
+     xlab = "DOC (µM)",
+     log = "xy",
+     xaxt = "n",
+     yaxt = "n",
+     xlim = c(55, 135),
+     ylim = c(0.01, 0.05),
+     pch = pch.indice,
+     bg = bg.indice.col,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(10, 100), tck = -0.04, cex = 1.3)
+axis(1, at = c(60, 130), cex = 1.3)
+
+axis(2, log_tick_marks(1,5)/100,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.01), tck = -0.04, las =1, cex = 1.3)
+axis(2, at = c(0.05), labels = "0.05", las = 1, cex = 1.3)
+
+text(x = max(DOC), y = Peak_D[which(DOC==max(DOC))], labels = "(  )")
+text(x = max(DOC[DOC<125]), y = Peak_D[which(DOC[DOC<125]==max(DOC[DOC<125]))], labels = "(  )")
+abline(DOC_D.lm)
+
+#Peak_AC
+plot(DOC, Peak_AC, las = 1,
+     ylab = expression(F[lambda*em]*440~(RU)),
+     xlab = "DOC (µM)",
+     log = "xy",
+     yaxt = "n",
+     xaxt = "n",
+     xlim = c(55, 135),
+     ylim = c(0.01, 0.1),
+     pch = pch.indice,
+     bg = bg.indice.col,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(10, 100), tck = -0.04, cex = 1.3)
+axis(1, at = c(60, 130), cex = 1.3)
+
+axis(2, log_tick_marks(1,10)/100,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.01, 0.1), tck = -0.04, las =1, cex = 1.3)
+
+text(x = max(DOC), y = Peak_AC[which(DOC==max(DOC))], labels = "(  )")
+text(x = max(DOC[DOC<125]), y = Peak_AC[which(DOC[DOC<125]==max(DOC[DOC<125]))], labels = "(  )")
+abline(DOC_AC.lm)
+
+#Peak_M
+plot(DOC, Peak_M, las = 1,
+     ylab = expression(F[lambda*em]*376~(RU)),
+     xlab = "DOC (µM)",
+     log = "xy",
+     yaxt = "n",
+     xaxt = "n",
+     xlim = c(55, 135),
+     ylim = c(0.01, 0.1),
+     pch = pch.indice,
+     bg = bg.indice.col,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(10, 100), tck = -0.04, cex = 1.3)
+axis(1, at = c(60, 130), cex = 1.3)
+
+axis(2, log_tick_marks(1,10)/100,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.01, 0.1), tck = -0.04, las =1, cex = 1.3)
+
+text(x = DOC[which(Peak_M==max(Peak_M))], y = max(Peak_M), labels = "(  )")
+text(x = max(DOC), y = Peak_M[which(DOC==max(DOC))], labels = "(  )")
+text(x = max(DOC[DOC<125]), y = Peak_M[which(DOC[DOC<125]==max(DOC[DOC<125]))], labels = "(  )")
+abline(DOC_M.lm)
+#Peak_T
+plot(DOC, Peak_T, las = 1,
+     ylab = expression(F[lambda*em]*350~(RU)),
+     xlab = "DOC (µM)",
+     log = "xy",
+     yaxt = "n",
+     xaxt = "n",
+     xlim = c(55, 135),
+     ylim = c(0.01, 0.1),
+     pch = pch.indice,
+     bg = bg.indice.col,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(10, 100), tck = -0.04, cex = 1.3)
+axis(1, at = c(60, 130), cex = 1.3)
+
+axis(2, log_tick_marks(1,10)/100,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.01, 0.1), tck = -0.04, las =1, cex = 1.3)
+
+text(x = max(DOC), y = Peak_T[which(DOC==max(DOC))], labels = "(  )")
+text(x = max(DOC[DOC<125]), y = Peak_T[which(DOC[DOC<125]==max(DOC[DOC<125]))], labels = "(  )")
+abline(DOC_T.lm)
+#Peak_B
+plot(DOC, Peak_B, las = 1,
+     ylab = expression(F[lambda*em]*308~(RU)),
+     xlab = "DOC (µM)",
+     log = "xy",
+     yaxt = "n",
+     xaxt = "n",
+     xlim = c(55, 135),
+     ylim = c(0.01, 0.3),
+     pch = pch.indice,
+     bg = bg.indice.col,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(10, 100), tck = -0.04, cex = 1.3)
+axis(1, at = c(60, 130), cex = 1.3)
+
+axis(2, log_tick_marks(1,30)/100,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.01, 0.1), tck = -0.04, las =1, cex = 1.3)
+
+text(x = max(DOC), y = Peak_B[which(DOC==max(DOC))], labels = "(  )")
+text(x = max(DOC[DOC<125]), y = Peak_B[which(DOC[DOC<125]==max(DOC[DOC<125]))], labels = "(  )")
+abline(DOC_B.lm)
+
+plot(DOC, Peak_B, 
+     col = "white", 
+     axes = F,
+     xlab = "",
+     ylab = "")
+legend("center",
+       pch=c(21, 21, 21, 21, 22, 24),
+       paste(c("2014", "2015", "2016", "LS", "CB", "GS")),
+       ncol=1,
+       pt.bg = c("#C7144C", "#33a02c", "#FFD700", "white", "white", "white"),
+       pt.cex = 1.3,
+       cex = 1.3)
+dev.off()
+
+```
+
+
+#Fig S7
+```{r}
+SPAD.hetero$Distribution = factor(SPAD.hetero$Distribution, levels = c("Normal", "Bimodal", "Logistique"))
+OTU.abund = colSums(Free.OTU.hetero)
+names(OTU.abund) = colnames(Free.OTU.hetero)
+SPAD.hetero.reorder = SPAD.hetero$Distribution[order(SPAD.hetero$Distribution)]
+OTU.abund = OTU.abund[order(SPAD.hetero$Distribution)]
+Acc.OTU = vector(mode = "numeric", length = 496)
+names(Acc.OTU) = names(OTU.abund)
+for(i in 1:length(OTU.abund))
+{
+   Acc.OTU[i] = sum(OTU.abund[1:i]/sum(OTU.abund))*100
+}
+{
+#pdf("../Output/Fig S7.pdf", width = 9.8, height = 5.6, family = "ArialMT")
+png("../Output/Fig S7.png", width = 9.8, height = 5.6, units = "in", res = 300)
+plot(Acc.OTU,
+     pch = 16,
+     cex = 1.3,
+     las = 1,
+     col = SPAD.hetero.reorder,
+     ylab = expression(Cumulative~relative~abundance~("%")),
+     xlab = "ASV number")
+abline(v = length(which(SPAD.hetero$Distribution=="Normal")), lty = 2)
+abline(v = 26+length(which(SPAD.hetero$Distribution=="Bimodal")), lty = 2)
+
+mtext(text = "Normal", side = 3,at = 0)
+mtext(text = "Bimodal", side = 3,at = 50)
+mtext(text = "Logistic", side = 3,at = 200)
+dev.off()
+}
+```
+
+#Predictive power SpAD
+```{r}
+#Note: Table 1 was created in Excel
+alpha.norm = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" & SPAD.hetero == "Normal")])
+nonSAR.norm = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" &WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade"  & SPAD.hetero == "Normal")])
+gamma.norm = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria" & SPAD.hetero == "Normal")])
+delta.logit = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria" & SPAD.hetero == "Logistique")])
+Bacte.norm = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Bacteroidia" & SPAD.hetero == "Normal")])
+
+alpha.bi = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" & SPAD.hetero == "Bimodal")])
+gamma.bi = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria" & SPAD.hetero == "Bimodal")])
+Bacte.bi = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Bacteroidia" & SPAD.hetero == "Bimodal")])
+
+AlphanonSAR = class.OTU[,1] - order.OTU[,1]
+BCD = BP+BR
+#####
+#BR
+summary(lm(log(BR)~log(Abundance)))
+AIC(lm(log(BR)~log(Abundance)))
+
+summary(lm(log(BR)~log(abond.norm)))
+AIC(lm(log(BR)~log(abond.norm)))
+summary(lm(log(BR)~log(abond.bi)))
+AIC(lm(log(BR)~log(abond.bi)))
+summary(lm(log(BR)~log(abond.logit)))
+AIC(lm(log(BR)~log(abond.logit)))
+
+AlphanonSAR = class.OTU[,1] - order.OTU[,1]
+
+summary(lm(log(BR)~log(class.OTU[,1])))
+AIC(lm(log(BR)~log(class.OTU[,1])))
+summary(lm(log(BR)~log(AlphanonSAR)))
+AIC(lm(log(BR)~log(AlphanonSAR)))
+summary(lm(log(BR)~log(class.OTU[,2])))
+AIC(lm(log(BR)~log(class.OTU[,2])))
+summary(lm(log(BR)~log(class.OTU[,3])))
+AIC(lm(log(BR)~log(class.OTU[,3])))
+summary(lm(log(BR)~log(class.OTU[,5]+1)))
+AIC(lm(log(BR)~log(class.OTU[,5]+1)))
+
+summary(lm(log(BR)~log(class.OTU[,1])+log(class.OTU[,2])))
+AIC(lm(log(BR)~log(class.OTU[,1])+log(class.OTU[,2])))
+summary(lm(log(BR)~log(class.OTU[,1])+log(class.OTU[,3])))
+AIC(lm(log(BR)~log(class.OTU[,1])+log(class.OTU[,3])))
+summary(lm(log(BR)~log(class.OTU[,1])+log(class.OTU[,5]+1)))
+AIC(lm(log(BR)~log(class.OTU[,1])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BR)~log(class.OTU[,2])+log(class.OTU[,3])))
+AIC(lm(log(BR)~log(class.OTU[,2])+log(class.OTU[,3])))
+summary(lm(log(BR)~log(class.OTU[,2])+log(class.OTU[,5]+1)))
+AIC(lm(log(BR)~log(class.OTU[,2])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BR)~log(class.OTU[,3])+log(class.OTU[,5]+1)))
+AIC(lm(log(BR)~log(class.OTU[,3])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BR)~log(alpha.norm)))
+AIC(lm(log(BR)~log(alpha.norm)))
+summary(lm(log(BR)~log(gamma.norm)))
+AIC(lm(log(BR)~log(gamma.norm)))
+summary(lm(log(BR)~log(Bacte.norm)))
+AIC(lm(log(BR)~log(Bacte.norm)))
+summary(lm(log(BR)~log(delta.logit+1)))
+AIC(lm(log(BR)~log(delta.logit+1)))
+
+summary(lm(log(BR)~log(alpha.bi)))
+AIC(lm(log(BR)~log(alpha.bi)))
+summary(lm(log(BR)~log(gamma.bi)))
+AIC(lm(log(BR)~log(gamma.bi)))
+summary(lm(log(BR)~log(Bacte.bi)))
+AIC(lm(log(BR)~log(Bacte.bi)))
+
+summary(lm(log(BR)~log(gamma.bi)))
+AIC(lm(log(BR)~log(gamma.bi)))
+summary(lm(log(BR)~log(Bacte.bi)))
+AIC(lm(log(BR)~log(Bacte.bi)))
+
+
+summary(lm(log(BR) ~ log(gamma.norm) + log(gamma.bi)))
+AIC(lm(log(BR) ~ log(gamma.norm) + log(gamma.bi)))
+
+summary(lm(log(BR) ~ log(gamma.norm) + log(Bacte.bi)))
+AIC(lm(log(BR) ~ log(gamma.norm) + log(Bacte.bi)))
+
+summary(lm(log(BR) ~ log(Bacte.norm) + log(gamma.bi)))
+AIC(lm(log(BR) ~ log(Bacte.norm) + log(gamma.bi)))
+
+summary(lm(log(BR) ~ log(Bacte.norm) + log(Bacte.bi)))
+AIC(lm(log(BR) ~ log(Bacte.norm) + log(Bacte.bi)))
+#####
+#BP
+summary(lm(log(BP)~log(Abundance)))
+AIC(lm(log(BP)~log(Abundance)))
+
+summary(lm(log(BP)~log(abond.norm)))
+AIC(lm(log(BP)~log(abond.norm)))
+summary(lm(log(BP)~log(abond.bi)))
+AIC(lm(log(BP)~log(abond.bi)))
+summary(lm(log(BP)~log(abond.logit)))
+AIC(lm(log(BP)~log(abond.logit)))
+
+summary(lm(log(BP)~log(class.OTU[,1])))
+AIC(lm(log(BP)~log(class.OTU[,1])))
+summary(lm(log(BP)~log(AlphanonSAR)))
+AIC(lm(log(BP)~log(AlphanonSAR)))
+summary(lm(log(BP)~log(class.OTU[,2])))
+AIC(lm(log(BP)~log(class.OTU[,2])))
+summary(lm(log(BP)~log(class.OTU[,3])))
+AIC(lm(log(BP)~log(class.OTU[,3])))
+summary(lm(log(BP)~log(class.OTU[,5]+1)))
+AIC(lm(log(BP)~log(class.OTU[,5]+1)))
+
+summary(lm(log(BP)~log(class.OTU[,1])+log(class.OTU[,2])))
+AIC(lm(log(BP)~log(class.OTU[,1])+log(class.OTU[,2])))
+summary(lm(log(BP)~log(class.OTU[,1])+log(class.OTU[,3])))
+AIC(lm(log(BP)~log(class.OTU[,1])+log(class.OTU[,3])))
+summary(lm(log(BP)~log(class.OTU[,1])+log(class.OTU[,5]+1)))
+AIC(lm(log(BP)~log(class.OTU[,1])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BP)~log(class.OTU[,2])+log(class.OTU[,3])))
+AIC(lm(log(BP)~log(class.OTU[,2])+log(class.OTU[,3])))
+summary(lm(log(BP)~log(class.OTU[,2])+log(class.OTU[,5]+1)))
+AIC(lm(log(BP)~log(class.OTU[,2])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BP)~log(class.OTU[,3])+log(class.OTU[,5]+1)))
+AIC(lm(log(BP)~log(class.OTU[,3])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BP)~log(alpha.norm)))
+AIC(lm(log(BP)~log(alpha.norm)))
+summary(lm(log(BP)~log(gamma.norm)))
+AIC(lm(log(BP)~log(gamma.norm)))
+summary(lm(log(BP)~log(Bacte.norm)))
+AIC(lm(log(BP)~log(Bacte.norm)))
+summary(lm(log(BP)~log(delta.logit+1)))
+AIC(lm(log(BP)~log(delta.logit+1)))
+
+summary(lm(log(BP)~log(alpha.bi)))
+AIC(lm(log(BP)~log(alpha.bi)))
+summary(lm(log(BP)~log(gamma.bi)))
+AIC(lm(log(BP)~log(gamma.bi)))
+summary(lm(log(BP)~log(Bacte.bi)))
+AIC(lm(log(BP)~log(Bacte.bi)))
+
+summary(lm(log(BP) ~ log(gamma.norm) + log(gamma.bi)))
+AIC(lm(log(BP) ~ log(gamma.norm) + log(gamma.bi)))
+
+summary(lm(log(BP) ~ log(gamma.norm) + log(Bacte.bi)))
+AIC(lm(log(BP) ~ log(gamma.norm) + log(Bacte.bi)))
+
+summary(lm(log(BP) ~ log(Bacte.norm) + log(gamma.bi)))
+AIC(lm(log(BP) ~ log(Bacte.norm) + log(gamma.bi)))
+
+summary(lm(log(BP) ~ log(Bacte.norm) + log(Bacte.bi)))
+AIC(lm(log(BP) ~ log(Bacte.norm) + log(Bacte.bi)))
+
+#####
+#Prokaryotic carbon demand
+summary(lm(log(BCD)~log(Abundance)))
+AIC(lm(log(BCD)~log(Abundance)))
+
+summary(lm(log(BCD)~log(abond.norm)))
+AIC(lm(log(BCD)~log(abond.norm)))
+summary(lm(log(BCD)~log(abond.bi)))
+AIC(lm(log(BCD)~log(abond.bi)))
+summary(lm(log(BCD)~log(abond.logit)))
+AIC(lm(log(BCD)~log(abond.logit)))
+
+summary(lm(log(BCD)~log(class.OTU[,1])))
+AIC(lm(log(BCD)~log(class.OTU[,1])))
+summary(lm(log(BCD)~log(AlphanonSAR)))
+AIC(lm(log(BCD)~log(AlphanonSAR)))
+summary(lm(log(BCD)~log(class.OTU[,2])))
+AIC(lm(log(BCD)~log(class.OTU[,2])))
+summary(lm(log(BCD)~log(class.OTU[,3])))
+AIC(lm(log(BCD)~log(class.OTU[,3])))
+summary(lm(log(BCD)~log(class.OTU[,5]+1)))
+AIC(lm(log(BCD)~log(class.OTU[,5]+1)))
+
+summary(lm(log(BCD)~log(class.OTU[,1])+log(class.OTU[,2])))
+AIC(lm(log(BCD)~log(class.OTU[,1])+log(class.OTU[,2])))
+summary(lm(log(BCD)~log(class.OTU[,1])+log(class.OTU[,3])))
+AIC(lm(log(BCD)~log(class.OTU[,1])+log(class.OTU[,3])))
+summary(lm(log(BCD)~log(class.OTU[,1])+log(class.OTU[,5]+1)))
+AIC(lm(log(BCD)~log(class.OTU[,1])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BCD)~log(class.OTU[,2])+log(class.OTU[,3])))
+AIC(lm(log(BCD)~log(class.OTU[,2])+log(class.OTU[,3])))
+summary(lm(log(BCD)~log(class.OTU[,2])+log(class.OTU[,5]+1)))
+AIC(lm(log(BCD)~log(class.OTU[,2])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BCD)~log(class.OTU[,3])+log(class.OTU[,5]+1)))
+AIC(lm(log(BCD)~log(class.OTU[,3])+log(class.OTU[,5]+1)))
+
+summary(lm(log(BCD)~log(alpha.norm)))
+AIC(lm(log(BCD)~log(alpha.norm)))
+summary(lm(log(BCD)~log(gamma.norm)))
+AIC(lm(log(BCD)~log(gamma.norm)))
+summary(lm(log(BCD)~log(Bacte.norm)))
+AIC(lm(log(BCD)~log(Bacte.norm)))
+summary(lm(log(BCD)~log(delta.logit+1)))
+AIC(lm(log(BCD)~log(delta.logit+1)))
+
+summary(lm(log(BCD)~log(alpha.bi)))
+AIC(lm(log(BCD)~log(alpha.bi)))
+summary(lm(log(BCD)~log(gamma.bi)))
+AIC(lm(log(BCD)~log(gamma.bi)))
+summary(lm(log(BCD)~log(Bacte.bi)))
+AIC(lm(log(BCD)~log(Bacte.bi)))
+
+summary(lm(log(BCD) ~ log(gamma.norm) + log(gamma.bi)))
+AIC(lm(log(BCD) ~ log(gamma.norm) + log(gamma.bi)))
+
+summary(lm(log(BCD) ~ log(gamma.norm) + log(Bacte.bi)))
+AIC(lm(log(BCD) ~ log(gamma.norm) + log(Bacte.bi)))
+
+summary(lm(log(BCD) ~ log(Bacte.norm) + log(gamma.bi)))
+AIC(lm(log(BCD) ~ log(Bacte.norm) + log(gamma.bi)))
+
+summary(lm(log(BCD) ~ log(Bacte.norm) + log(Bacte.bi)))
+AIC(lm(log(BCD) ~ log(Bacte.norm) + log(Bacte.bi)))
+```

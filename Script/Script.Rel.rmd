@@ -1,0 +1,613 @@
+---
+title: "Script"
+author: "Richard LaBrie"
+date: "4 juillet 2019"
+output: html_document
+---
+
+```{r}
+#Load required data, libraries and functions
+
+#Data
+Indice.OTU = read.csv("../Input/Indice.ASV.hetero132.csv", header=T, row.names = 1)
+Chimie = read.csv("../Input/Chimie.csv", header=T, row.names = 1, sep = ";")
+Metadata = read.csv("../Input/samdf_bact_transect.csv", header=T, sep=";")
+Free.OTU.hetero = read.csv("../Input/WorkingASV132.cor.csv", row.names = 1)
+SPAD.hetero = read.csv("../Input/SPAD.hetero.Vec.csv", row.names=1)
+WorkingTaxoTransect.free.hetero = read.csv("../Input/WorkingTaxo132.hetero.csv", header=T, row.names = 1)
+
+#Libraries
+library("extrafont")
+library(vegan)
+
+#Functions
+log_tick_marks <- function(min,max){
+ nsplit <- abs(round(log10(max-min)))
+ i <- 0
+ nurange <- c()
+ while(i<=nsplit) {
+   nurange <- c(nurange,sapply(1:10,function(x) x*(10^i)))
+   i <- i+1;
+ }
+ nurange
+}
+
+```
+
+```{r}
+#Transform data
+
+for(i in 1:dim(Free.OTU.hetero)[1])
+{
+  Free.OTU.hetero[i,] = Free.OTU.hetero[i,]/rowSums(Free.OTU.hetero[i,])
+}
+
+WorkID = Metadata[Metadata$Living == "free", "EnvID"]
+WorkChimie = Chimie[rownames(Chimie) %in% WorkID,]
+WorkChimie$Watermass = factor(WorkChimie$Watermass, levels = c("LSS", "CLB", "GSS"))
+WorkChimie = WorkChimie[order(rownames(WorkChimie), decreasing = F),]
+attach(WorkChimie)
+attach(Indice.OTU)
+Indice.OTU = Indice.OTU[,c(1,2,3,5,6,7,4,8,9)]
+
+DON = TDN_uMN - (NO3 + NO2 + NH4)
+P_Peak_T = Peak_T / (Peak_AC + Peak_B + Peak_D + Peak_M + Peak_T) * 100
+
+
+#Change names of SPAD
+unique(rownames(SPAD.hetero) == colnames(Free.OTU.hetero))
+colnames(SPAD.hetero) = "Distribution"
+SPAD.hetero$Distribution = as.character(SPAD.hetero$Distribution)
+SPAD.hetero$Distribution[SPAD.hetero$Distribution == "Lognormal"] <- "Logistique"
+SPAD.hetero$Distribution = as.factor(SPAD.hetero$Distribution)
+
+#Merge OTUs at the class level
+
+# Author Nicolas FOrtin St-Gelais
+# where m=community matrix (cols = taxa, rows = sites)
+# c= a vertor with the selected taxonomic level for agregation and OTU as name
+mergeByCat<- function(m,c){
+  c=c[!is.na(c)]
+  c=c[names(c)%in%colnames(m)]
+  m=m[,names(c)]
+  mergedM=matrix(NA,nrow(m),length(unique(c)),dimnames=list(rownames(m),unique(c)))
+  for(i in unique(c)){
+    mergedM[,i]=rowSums(m[,c%in%as.character(i),drop=F])}
+  return(mergedM)
+}
+
+#Author Greg Snow
+shadowtext <- function(x, y=NULL, labels, col='white', bg='black',
+	theta= seq(pi/4, 2*pi, length.out=8), r=0.1, ... )
+{
+	xy <- xy.coords(x,y)
+	xo <- r*strwidth('A')
+	yo <- r*strheight('A')
+	for (i in theta)
+	{
+	  text(xy$x + cos(i)*xo, xy$y + sin(i)*yo,labels, col=bg, ... )
+	}
+	text(xy$x, xy$y, labels, col=col, ... )
+}
+
+# #Save colnames
+# col.temp = colnames(WorkingTaxoTransect.free.hetero)
+# #Add a column to get an easy sorting of OTU
+# WorkingTaxoTransect.free.hetero = cbind(1, WorkingTaxoTransect.free.hetero)
+# colnames(WorkingTaxoTransect.free.hetero) = c("OTU", col.temp)
+# WorkingTaxoTransect.free.hetero[,1] = paste0("OTU",seq(1,dim(WorkingTaxoTransect.free.hetero)[1]))
+WorkingTaxoTransect.free.hetero = cbind(1, WorkingTaxoTransect.free.hetero)
+WorkingTaxoTransect.free.hetero[,1] = colnames(Free.OTU.hetero)
+
+#Create a workable matrix name and change colnames to match Taxonomy table
+m = Free.OTU.hetero
+colnames(m) = WorkingTaxoTransect.free.hetero[,1]
+
+class = WorkingTaxoTransect.free.hetero[,"Class"]
+names(class) = WorkingTaxoTransect.free.hetero[,1]
+
+class.OTU = mergeByCat(m, class)
+
+Order = WorkingTaxoTransect.free.hetero[,"Order"]
+names(Order) = WorkingTaxoTransect.free.hetero[,1]
+
+order.OTU = mergeByCat(m, Order)
+
+Family = WorkingTaxoTransect.free.hetero[,"Family"]
+names(Family) = WorkingTaxoTransect.free.hetero[,1]
+
+family.OTU = mergeByCat(m, Family)
+```
+
+```{r}
+#Graphical parameters
+#Parametre graphique
+#Couleur
+bg.indice = as.character(Metadata[which(Metadata$Living == "free"),"Year"])
+bg.indice[bg.indice == "2014"] = "Grey50" #Vert
+bg.indice[bg.indice == "2015"] = "White" #Jaune
+bg.indice[bg.indice == "2016"] = "Black" #Rouge
+
+bg.indice.col = as.character(Metadata[which(Metadata$Living == "free"),"Year"])
+bg.indice.col[bg.indice.col == "2014"] = "#C7144C" #Rouge
+bg.indice.col[bg.indice.col == "2015"] = "#33a02c" #Vert
+bg.indice.col[bg.indice.col == "2016"] = "#FFD700" #Jaune
+
+#pch
+pch.indice = as.character(Metadata[which(Metadata$Living == "free"),"Watermass"])
+pch.indice[pch.indice == "LSS"] = 21
+pch.indice[pch.indice == "CLB"] = 22
+pch.indice[pch.indice == "GSS"] = 24
+pch.indice = as.numeric(pch.indice)
+```
+
+#Fig S8
+```{r}
+#High level DOM-Bact.Comm-Metabolism relationships
+abond.graph = (1 - class.OTU[,1])
+abond.graph.SAR = (1 - order.OTU[,1])
+
+
+
+Abond.Chla.lm <- lm(abond.graph ~ log10(Chla)) #R2 = 0.26
+Abond.Chla.lm.SAR <- lm(abond.graph.SAR ~ log10(Chla)) #R2=0.31
+
+{
+png("../Output/Fig S8.png", width = 8, height = 4, units = "in", res = 300)
+#pdf("../Output/Fig S8.pdf", family = "ArialMT", width = 9, height = 7)
+par(mfrow = c(1,2))
+par(mar = c(5, 6, 3, 2) + 0.1)
+
+plot(abond.graph.SAR ~ Chla, las = 1,
+     ylab = "",
+     xlab = expression(Chlorophyll ~ italic(a) ~ (mg ~ m^{-3})),
+     log = "x",
+     xaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+
+axis(1, log_tick_marks(10,100)/10,FALSE, TRUE, NA, NA)
+axis(1, at = c(1, 10), tck = -0.04, cex = 1.3)
+axis(1, at = c(0.3), cex = 1.3)
+
+# axis(2, log_tick_marks(10,100),FALSE, TRUE, NA, NA)
+# axis(2, at = c(10,100), tck = -0.04, cex = 1.3, las = 1)
+# axis(2, at = c(40,400), cex = 1.3, las = 1)
+
+mtext(text = expression(Non ~ SAR11), side = 2, line = 4.8)
+mtext(text = expression(relative~proportion), side = 2, line = 3.3)
+abline(Abond.Chla.lm.SAR, lwd = 2)
+mtext(text = "a", side = 3, adj = 1, at = 0.25)
+
+plot(BR ~ abond.graph.SAR, las = 1,
+     ylab = "",
+     xlab = expression(Non ~ SAR11 ~ relative~proportion),
+     log = "y",
+     ylim = c(0.1,4),
+     yaxt = "n",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.3,
+     cex.lab = 1.3,
+     cex.axis = 1.3)
+# axis(1, log_tick_marks(10,100),FALSE, TRUE, NA, NA)
+# axis(1, at = c(10,100), tck = -0.04, cex = 1.3)
+# axis(1, at = c(40,400), cex = 1.3)
+
+axis(2, log_tick_marks(0.1,10)/10,FALSE, TRUE, NA, NA)
+axis(2, at = c(0.1, 1), tck = -0.04, las = 1, cex = 1.3)
+axis(2, at = c(4), labels = "4.0", las = 1, cex = 1.3)
+
+mtext(text = expression(PR ~ (mu * M ~ C ~ L^{-1} ~ d^{-1})), side = 2, line = 3.5)
+abline(lm(log10(BR) ~ abond.graph.SAR), lwd = 2)
+mtext(text = "b", side = 3, adj = 1, at = 0.15)
+
+legend("bottomright",
+       pch=c(21, 21, 21, 21, 22, 23),
+       paste(c("2014", "2015", "2016", "LS", "CB", "GS")),
+       ncol=1,
+       pt.bg = c("Grey50", "White", "Black", "white", "white", "white"))
+dev.off()
+}
+
+summary(lm(log10(BR) ~ log10 (BP) + abond.graph))
+```
+
+#Fig S9
+```{r}
+#Mid level DOM-Bact.comm relationships
+
+Norm.graph = Indice.OTU$abond.norm / sum(Indice.OTU[,c(1:3)])
+Norm.Temp = lm(Norm.graph ~ P_Peak_T)
+
+NoSAR.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade" & SPAD.hetero == "Normal")]
+NoSAR.abond = rowSums(NoSAR.temp)*100
+Norm.T = lm(NoSAR.abond ~ P_Peak_T)
+
+NoSAR.logit = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade" & SPAD.hetero == "Logistique")] *100
+Logit.graph = rowSums(NoSAR.logit)
+Logit.D = (lm(Logit.graph ~ Peak_D))
+
+Delta.graph = rowSums(Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria" & SPAD.hetero == "Logistique")])*100
+
+delta.D = (lm(Delta.graph[Delta.graph>0] ~ Peak_D[Delta.graph>0]))
+
+delta.M = lm(Delta.graph[Delta.graph > 0 & Peak_M < 0.06] ~ Peak_M[Delta.graph > 0 & Peak_M < 0.06])
+
+summary(lm(Delta.graph[Delta.graph>0&DOC<115] ~ DOC[Delta.graph>0 & DOC<115]))
+
+arom.fdom = Peak_D + Peak_M
+
+summary(lm(Delta.graph[Delta.graph>0 & Peak_M<0.06] ~ arom.fdom[Delta.graph>0 & Peak_M<0.06]))
+
+{
+png("../Output/Fig S9.png", width = 10, height = 4, units = "in", res = 300)
+#pdf("../Output/Fig S9.pdf", family = "ArialMT", width = 10, height = 4)
+par(mfrow = c(1,3))
+par(mar = c(6, 7.3, 4, 2) + 0.1)
+plot(NoSAR.abond ~ P_Peak_T, las = 1,
+     ylab = "",
+     xlab = expression(F[lambda*em]*350~("%")),
+     log = "",
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.6,
+     cex.lab = 1.6,
+     cex.axis = 1.6)
+
+mtext(text = expression(Ubiquitous), side = 2, line = 5.8)
+mtext(text = expression(non~SAR11~("%")), side = 2, line = 3.3)
+abline(Norm.T, lwd = 2)
+mtext(text = "a", side = 3, adj = 1, at = -0.5)
+
+
+plot(Logit.graph ~ Peak_D, las = 1,
+     ylab = "",
+     xlab = expression(F[lambda*em]*492~(RU)),
+     pch = pch.indice,
+     bg = bg.indice,
+     cex = 1.6,
+     cex.lab = 1.6,
+     cex.axis = 1.6)
+
+text(y = max(Logit.graph), x = Peak_D[which(Logit.graph==max(Logit.graph))], labels = "(  )")
+mtext(text = expression(Spatially ~ constrained), side = 2, line = 5.8)
+mtext(text = expression(Non~SAR11~ASVs~("%")), side = 2, line = 3.6)
+abline(Logit.D, lwd = 2)
+mtext(text = "b", side = 3, adj = 1, at = 0.01)
+
+plot(Delta.graph[Delta.graph > 0] ~ Peak_M[Delta.graph > 0], las = 1,
+     ylab = "",
+     xlab = expression(F[lambda*em]*376~(RU)),
+     xlim = c(0.01, 0.1),
+     pch = pch.indice[Delta.graph > 0],
+     bg = bg.indice[Delta.graph > 0],
+     cex = 1.6,
+     cex.lab = 1.6,
+     cex.axis = 1.6)
+
+mtext(text = expression(Spatially~constrained), side = 2, line = 5.8)
+mtext(text = expression(delta*-proteobacteria ~ ("%")), side = 2, line = 3.8)
+abline(delta.M, lwd = 2)
+mtext(text = "c", side = 3, adj = 1, at = 0.01)
+text(x = max(Peak_M), y = Delta.graph[which(Peak_M == max(Peak_M))], labels = "(  )")
+
+legend("bottomright",
+       pch=c(21, 21, 21, 21, 22, 23),
+       paste(c("2014", "2015", "2016", "LS", "CB", "GS")),
+       ncol=1,
+       pt.bg = c("Grey50", "White", "Black", "white", "white", "white"),
+       cex=1.3)
+
+dev.off()
+}
+```
+
+#Fig 4-5 proportions, for reference only (not in the SI)
+```{r}
+AA = cbind(L.Asx, D.Asx ,L.Glx, D.Glx, L.Ser, D.Ser, Thr, Gly, Arg, b.Ala, His, L.Ala, g.Aba, D.Ala, Tyr, Val, Phe, Ile, Leu, Lys)[c(1:16),]
+AA.prot = cbind(L.Asx,L.Glx, L.Ser, Thr, Gly, Arg, His, L.Ala, Tyr, Val, Phe, Ile, Leu, Lys)[c(1:16),]
+AA.names.prot = c("Asx","Glx", "Ser", "Thr", "Gly", "Arg", "His", "Ala", "Tyr", "Val", "Phe", "Ile", "Leu", "Lys")
+#SPAD.auto = as.matrix(SPAD[Chloro,])
+#Free.OTU.auto = Free.OTU[,Chloro]
+THAA = rowSums(AA.prot)
+AA.nonprot = cbind(D.Asx, D.Glx, D.Ser, b.Ala, g.Aba, D.Ala)[c(1:16),]
+AA.nonprot.names = c("D.Asx", "D.Glx", "D.Ser", "b.Ala", "g.Aba", "D.Ala")
+
+
+#High resolution Env. Comm Comp
+SPAD.temp = Free.OTU.hetero[,SPAD.hetero == "Normal"]
+NormCor <- cor(AA.prot[c(1:16),], SPAD.temp[c(1:16),], method = "spearman")
+NormCor.thaa <- cor(THAA, SPAD.temp[c(1:16),], method = "spearman")
+c(min(t(NormCor)),
+  median(t(NormCor)),
+  max(t(NormCor)),
+  min(t(NormCor)[,-c(6,13,14)]),
+  median(t(NormCor)[,-c(6,13,14)]),
+  max(t(NormCor)[,-c(6,13,14)]))
+
+SPAD.temp = Free.OTU.hetero[,SPAD.hetero == "Bimodal"]
+BimoCor <- cor(AA.prot[c(1:16),], SPAD.temp[c(1:16),], method = "spearman")
+BimoCor.thaa <- cor(THAA, SPAD.temp[c(1:16),], method = "spearman")
+c(min(t(BimoCor)),
+  median(t(BimoCor)),
+  max(t(BimoCor)),
+  min(t(BimoCor)[,-c(6,13,14)]),
+  median(t(BimoCor)[,-c(6,13,14)]),
+  max(t(BimoCor)[,-c(6,13,14)]))
+
+
+SPAD.temp = Free.OTU.hetero[,SPAD.hetero == "Logistique"]
+SPAD.temp = SPAD.temp[1:16,]
+#Enlever les OTU absent
+Empty.find = colSums(SPAD.temp != 0)
+Empty.index = which(Empty.find == 0)
+SPAD.temp = SPAD.temp[,-Empty.index]
+LogiCor <- cor(AA.prot[c(1:16),], SPAD.temp, method = "spearman")
+LogiCor.thaa <- cor(THAA, SPAD.temp, method = "spearman")
+
+c(min(t(LogiCor)),
+  median(t(LogiCor)),
+  max(t(LogiCor)),
+  min(t(LogiCor)[,-c(6,13,14)]),
+  median(t(LogiCor)[,-c(6,13,14)]),
+  max(t(LogiCor)[,-c(6,13,14)]))
+
+thaa.graph = c(NormCor.thaa, BimoCor.thaa, LogiCor.thaa)
+thaa.names = c(rep("1", length(NormCor.thaa)),
+               rep("2", length(BimoCor.thaa)),
+               rep("3", length(LogiCor.thaa)))
+
+t.test(NormCor.thaa)
+t.test(BimoCor.thaa)
+t.test(LogiCor.thaa)
+
+box.SPAD = matrix(c(as.vector(NormCor),
+                    as.vector(BimoCor),
+                    as.vector(LogiCor), 
+                    rep("Ubiquitous", length(as.vector(NormCor))),
+                    rep("Bloomer", length(as.vector(BimoCor))),
+                    rep("Rare", length(as.vector(LogiCor)))),
+                  ncol=2)
+spad.sp = c(as.vector(NormCor), as.vector(BimoCor), as.vector(LogiCor))
+spad.name = c(rep("Ubiquitous", length(as.vector(NormCor))),
+                    rep("Bloomer", length(as.vector(BimoCor))),
+                    rep("Rare", length(as.vector(LogiCor))))
+#colnames(box.SPAD) = c("Spearman", "SPAD")
+spad.aov = aov(spad.sp~spad.name)
+posthoc.spad <- TukeyHSD(spad.aov, "spad.name", conf.level=0.99)
+posthoc.spad
+plot(posthoc.spad, las=1)
+
+
+#Composition & structure
+alpha.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" & SPAD.hetero == "Normal")]
+alpha.temp = alpha.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+NormAlphaCor <- cor(AA.prot[c(1:16),], alpha.temp, method = "spearman")
+c(min(t(NormAlphaCor)),
+  median(t(NormAlphaCor)),
+  max(t(NormAlphaCor)),
+  min(t(NormAlphaCor)[,-c(6,13,14)]),
+  median(t(NormAlphaCor)[,-c(6,13,14)]),
+  max(t(NormAlphaCor)[,-c(6,13,14)]))
+
+
+#Composition & structure
+nonSAR.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria" & SPAD.hetero == "Normal" & WorkingTaxoTransect.free.hetero[,5] != "SAR11_clade" )]
+nonSAR.temp = nonSAR.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+nonSARCor <- cor(AA.prot[c(1:16),], nonSAR.temp, method = "spearman")
+c(min(t(NormAlphaCor)),
+  median(t(NormAlphaCor)),
+  max(t(NormAlphaCor)),
+  min(t(NormAlphaCor)[,-c(6,13,14)]),
+  median(t(NormAlphaCor)[,-c(6,13,14)]),
+  max(t(NormAlphaCor)[,-c(6,13,14)]))
+
+
+Gamma.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria" & SPAD.hetero == "Normal")]
+Gamma.temp = Gamma.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(Gamma.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#Gamma.temp = Gamma.temp[,-Empty.index]
+NormGammaCor <- cor(AA.prot[c(1:16),], Gamma.temp, method = "spearman")
+c(min(t(NormGammaCor)),
+  median(t(NormGammaCor)),
+  max(t(NormGammaCor)),
+  min(t(NormGammaCor)[,-c(6,13,14)]),
+  median(t(NormGammaCor)[,-c(6,13,14)]),
+  max(t(NormGammaCor)[,-c(6,13,14)]))
+
+
+Gamma.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria" & SPAD.hetero == "Bimodal")]
+Gamma.temp = Gamma.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(Gamma.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#Gamma.temp = Gamma.temp[,-Empty.index]
+GammaCor.Bi <- cor(AA.prot[c(1:16),], Gamma.temp, method = "spearman")
+c(min(t(GammaCor.Bi)),
+  median(t(GammaCor.Bi)),
+  max(t(GammaCor.Bi)),
+  min(t(GammaCor.Bi)[,-c(6,13,14)]),
+  median(t(GammaCor.Bi)[,-c(6,13,14)]),
+  max(t(GammaCor.Bi)[,-c(6,13,14)]))
+
+Flavo.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Bacteroidia" & SPAD.hetero == "Normal")]
+Flavo.temp = Flavo.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+NormFlavoCor <- cor(AA.prot[c(1:16),], Flavo.temp, method = "spearman")
+c(min(t(NormFlavoCor)),
+  median(t(NormFlavoCor)),
+  max(t(NormFlavoCor)),
+  min(t(NormFlavoCor)[,-c(6,13,14)]),
+  median(t(NormFlavoCor)[,-c(6,13,14)]),
+  max(t(NormFlavoCor)[,-c(6,13,14)]))
+
+delta.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria" & SPAD.hetero == "Logistique")]
+delta.temp = delta.temp[1:16,]
+#Enlever les OTU absent
+Empty.find = colSums(delta.temp != 0)
+Empty.index = which(Empty.find == 0)
+delta.temp = delta.temp[,-Empty.index]
+LogitDeltaCor <- cor(AA.prot[c(1:16),], delta.temp, method = "spearman")
+
+c(min(t(LogitDeltaCor)),
+  median(t(LogitDeltaCor)),
+  max(t(LogitDeltaCor)),
+  min(t(LogitDeltaCor)[,-c(6,13,14)]),
+  median(t(LogitDeltaCor)[,-c(6,13,14)]),
+  max(t(LogitDeltaCor)[,-c(6,13,14)]))
+
+#Composition & structure
+alpha.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Alphaproteobacteria")]
+alpha.temp = alpha.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+alphaCor <- cor(THAA, alpha.temp, method = "spearman")
+
+
+gamma.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Gammaproteobacteria")]
+gamma.temp = gamma.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+gammaCor <- cor(THAA, gamma.temp, method = "spearman")
+
+Flavo.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Bacteroidia")]
+Flavo.temp = Flavo.temp[1:16,]
+#Enlever les OTU absent
+#Empty.find = colSums(delta.temp != 0)
+#Empty.index = which(Empty.find == 0)
+#delta.temp = delta.temp[,-Empty.index]
+FlavoCor <- cor(THAA, Flavo.temp, method = "spearman")
+
+delta.temp = Free.OTU.hetero[,which(WorkingTaxoTransect.free.hetero[,4] == "Deltaproteobacteria")]
+delta.temp = delta.temp[1:16,]
+#Enlever les OTU absent
+Empty.find = colSums(delta.temp != 0)
+Empty.index = which(Empty.find == 0)
+delta.temp = delta.temp[,-Empty.index]
+deltaCor <- cor(THAA, delta.temp, method = "spearman")
+
+taxo.thaa.graph = c(alphaCor, gammaCor, FlavoCor, deltaCor)
+taxo.thaa.names = c(rep("1", length(alphaCor)),
+               rep("2", length(gammaCor)),
+               rep("3", length(FlavoCor)),
+               rep("4", length(deltaCor)))
+
+t.test(alphaCor)
+t.test(gammaCor)
+t.test(FlavoCor)
+t.test(deltaCor)
+
+{
+#png("../Output/Fig 4-rel.png",  width = 15, height = 6, units = "in", res = 300)
+pdf("../Output/Fig 4-rel.pdf",  width = 8, height = 6, family = "ArialMT")
+  par(mar = c(3, 6, 4, 1) + 0.1)
+  par(mfrow=c(2,1))
+  boxplot(thaa.graph ~ thaa.names, 
+        ylim = c(-1,1),
+        xlab = "",
+        ylab = "",
+        names = c("Ubiquitous", "Bloomer", "Spatially constrained"),
+        las = 1,
+        cex.lab = 1.4,
+        cex.axis = 1.4,
+        cex.main = 1.4)
+  abline(h=0, col = "Grey50", lwd = 2)
+  mtext(text = "Spearman correlation coefficient", side =2, line = 3.5, cex = 1.4)
+  mtext(text = "a", side = 3, adj = 1, at = -0.5)
+  
+  boxplot(taxo.thaa.graph ~ taxo.thaa.names, 
+        ylim = c(-1,1),
+        xlab = "",
+        ylab = "",
+        names = c(expression(alpha~-proteo), expression(gamma~-proteo), "Bacteroidia", expression(delta~-proteo)),
+        las = 1,
+        cex.lab = 1.4,
+        cex.axis = 1.4,
+        cex.main = 1.4)
+  abline(h=0, col = "Grey50", lwd = 2)
+  #mtext(text = "Spearman correlation coefficient", side =2, line = 3.5, cex = 1.4)
+  mtext(text = "b", side = 3, adj = 1, at = -0.5)
+dev.off()
+}
+  
+{
+png("../Output/Fig 5-rel.png",  width = 15, height = 12, units = "in", res = 300)
+#pdf("../Output/Fig 5-rel.pdf",  width = 13, height = 12, family = "ArialMT")
+par(mfrow = c(2,2))
+par(mar = c(8, 6, 4, 1) + 0.1)
+
+boxplot(NormAlphaCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Ubiquitous ~ alpha*-proteobacteria),
+        names = c("SAR11-Ia_1", "SAR11-Ia_11", "ASV14", "ASV19", "Plankto_21", "ASV24", "OCS116_36", "Plankto_38", "SAR11-III_42", "SAR116_46", "SAR11-Ib_50", "SAR11-Ia_74"),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "a", side = 3, adj = 1, at = -0.5)
+abline(h=0, col = "Grey50", lwd = 2)
+
+boxplot(NormGammaCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Ubiquitous ~ gamma*-proteobacteria),
+        names = c("Thio_7", "Cellvibrio_10", "Oceano_16", "SAR86_33"),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "b", side = 3, adj = 1, at = 0)
+abline(h=0, col = "Grey50", lwd = 2)
+
+boxplot(NormFlavoCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Ubiquitous ~ Bacteroidia),
+        names = c("Polari_4", "Ulvi_12", "Formosa_13", "Auran_23", "Formosa_23", "NS2b_26", "NS9_30", "NS9_35", "NS2b_37", "NS5_49"),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "c", side = 3, adj = 1, at = 0)
+abline(h=0, col = "Grey50", lwd = 2)
+
+boxplot(LogitDeltaCor, 
+        ylim = c(-1,1),
+        ylab = "",
+        main = expression(Spatially~constrained ~ delta*-proteobacteria),
+        names = paste0("SAR324_",c(150, 223, 360, 425)),
+        las = 2,
+        cex.lab = 2,
+        cex.axis = 1.4,
+        cex.main = 2)
+mtext(text = "Spearman Rho", side = 2, line = 3.5, cex = 1.3)
+mtext(text = "d", side = 3, adj = 1, at = 0)
+abline(h=0, col = "Grey50", lwd = 2)
+dev.off()
+}
+```

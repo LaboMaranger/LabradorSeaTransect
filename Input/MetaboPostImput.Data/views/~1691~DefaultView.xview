@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<View xview="0.18" collection="MetaboPostImput">
+<GeographicMap>
+<MapDomain lon_max="320.544" lat_max="62.1997" lon_min="293.621" lat_min="50.6365"/>
+</GeographicMap>
+<MapWindow>
+<Symbol size="1.2" small_size="0.4" type="0" color="1"/>
+<Window>
+<Geometry x_offset_bb="1" x_right="320.544" y_offset_bb="1" y_length_bb="6.6" y_top="62.1997" x_length_bb="8.5" x_projection="100" y_projection="100" y_bottom="50.6365" x_left="293.621"/>
+</Window>
+</MapWindow>
+<Section width="0.0094" section_name="AR7W">
+<xNodes>304.851,311.883</xNodes>
+<yNodes>54.093,60.7498</yNodes>
+</Section>
+<DataWindow>
+<AxisVariables>
+<!--Section Distance [km]-->
+<xAxis var_list="1" var_id="200000" is_reversed="F"/>
+<!--Depth-->
+<yAxis var_list="1" var_id="5" is_reversed="T"/>
+<!--DOC-->
+<zAxis var_list="1" var_id="25" is_reversed="F"/>
+</AxisVariables>
+<Modes plot_mode="2" window_mode="2" window_type="0"/>
+<Gridding draw_shaded="T" auto_scale_lengths="T" x_scale_length="3.30564" y_scale_length="5.35427"/>
+<BadEstimateHiding hide="T" max_distance="3"/>
+<DataMark size="0.2" color="17"/>
+<Window>
+<Geometry x_offset_bb="2.6" x_right="851.657" y_offset_bb="15.4" y_length_bb="4" y_top="0" x_length_bb="10.2" y_bottom="60" x_left="0"/>
+<ColorScale z_range_start="50" z_range_end="275"/>
+</Window>
+</DataWindow>
+<DataWindow>
+<AxisVariables>
+<!--Section Distance [km]-->
+<xAxis var_list="1" var_id="200000" is_reversed="F"/>
+<!--Depth-->
+<yAxis var_list="1" var_id="5" is_reversed="T"/>
+<!--Chla-->
+<zAxis var_list="1" var_id="15" is_reversed="F"/>
+</AxisVariables>
+<Modes plot_mode="2" window_mode="2" window_type="0"/>
+<Gridding draw_shaded="T" auto_scale_lengths="T" x_scale_length="3.30564" y_scale_length="5.35427"/>
+<BadEstimateHiding hide="T" max_distance="3"/>
+<DataMark size="0.2" color="17"/>
+<Window>
+<Geometry x_offset_bb="2.6" x_right="851.657" y_offset_bb="9.5" y_length_bb="4" y_top="0" x_length_bb="10.2" y_bottom="60" x_left="0"/>
+<ColorScale z_range_start="0" z_range_end="11"/>
+</Window>
+</DataWindow>
+<DataWindow>
+<AxisVariables>
+<!--Section Distance [km]-->
+<xAxis var_list="1" var_id="200000" is_reversed="F"/>
+<!--Depth-->
+<yAxis var_list="1" var_id="5" is_reversed="T"/>
+<!--DON-->
+<zAxis var_list="1" var_id="27" is_reversed="F"/>
+</AxisVariables>
+<Modes plot_mode="2" window_mode="2" window_type="0"/>
+<Gridding draw_shaded="T" auto_scale_lengths="T" x_scale_length="3.30564" y_scale_length="5.35427"/>
+<BadEstimateHiding hide="T" max_distance="3"/>
+<DataMark size="0.2" color="17"/>
+<Window>
+<Geometry x_offset_bb="16.5" x_right="851.657" y_offset_bb="15.4" y_length_bb="4" y_top="0" x_length_bb="10.2" y_bottom="60" x_left="0"/>
+<ColorScale z_range_start="1" z_range_end="10"/>
+</Window>
+</DataWindow>
+<DataWindow>
+<AxisVariables>
+<!--Section Distance [km]-->
+<xAxis var_list="1" var_id="200000" is_reversed="F"/>
+<!--Annee-->
+<yAxis var_list="1" var_id="2" is_reversed="T"/>
+<!--DSP-4-->
+<zAxis var_list="1" var_id="7" is_reversed="F"/>
+</AxisVariables>
+<Modes plot_mode="2" window_mode="2" window_type="0"/>
+<Gridding draw_shaded="T" auto_scale_lengths="F" x_scale_length="4.8" y_scale_length="7.9"/>
+<BadEstimateHiding hide="T" max_distance="3"/>
+<DataMark size="0.2" color="17"/>
+<Window>
+<Geometry x_offset_bb="16.5" x_right="851.657" y_offset_bb="9.5" y_length_bb="4" y_top="2014" x_length_bb="10.2" y_bottom="2016" x_left="0"/>
+<ColorScale z_range_start="-50" z_range_end="5"/>
+</Window>
+</DataWindow>
+<DataWindow>
+<AxisVariables>
+<!--Watermass-->
+<xAxis var_list="1" var_id="1" is_reversed="F"/>
+<!--ID-->
+<yAxis var_list="1" var_id="0" is_reversed="T"/>
+</AxisVariables>
+<Modes plot_mode="0" window_mode="2" window_type="0"/>
+<DataMark size="0.2" color="17"/>
+<Window>
+<Geometry x_offset_bb="12" x_right="1e+10" y_offset_bb="1.5" y_length_bb="5.5" y_top="1e+10" x_length_bb="6" y_bottom="-1e+10" x_left="-1e+10"/>
+</Window>
+</DataWindow>
+<DataWindow>
+<AxisVariables>
+<!--Annee-->
+<xAxis var_list="1" var_id="2" is_reversed="F"/>
+<!--ID-->
+<yAxis var_list="1" var_id="0" is_reversed="T"/>
+</AxisVariables>
+<Modes plot_mode="0" window_mode="2" window_type="0"/>
+<DataMark size="0.2" color="17"/>
+<Window>
+<Geometry x_offset_bb="21" x_right="2016" y_offset_bb="1.5" y_length_bb="5.5" y_top="400000" x_length_bb="6" y_bottom="435000" x_left="2014"/>
+</Window>
+</DataWindow>
+<BasicVariables>
+<!--ID-->
+<Variable min_value="400000" var_id="0" max_value="435000"/>
+<!--Annee-->
+<Variable min_value="2014" var_id="2" max_value="2016"/>
+<!--Lon-->
+<Variable min_value="0" var_id="4" max_value="60"/>
+<!--Depth-->
+<Variable min_value="0" var_id="5" max_value="60"/>
+<!--Bloom-->
+<Variable min_value="-55" var_id="6" max_value="5"/>
+<!--DSP-4-->
+<Variable min_value="-55" var_id="7" max_value="5"/>
+<!--Chla-->
+<Variable min_value="0" var_id="15" max_value="11"/>
+<!--DOC-->
+<Variable min_value="50" var_id="25" max_value="275"/>
+<!--DON-->
+<Variable min_value="1" var_id="27" max_value="10"/>
+</BasicVariables>
+<IsoSurfaceVariables>
+<!--Watermass @ ID=first-->
+<IsoVariable surface_var_id="0" var_id="1" surface_value="first"/>
+<!--Annee @ ID=first-->
+<IsoVariable surface_var_id="0" var_id="2" surface_value="first"/>
+<!--Lat @ ID=first-->
+<IsoVariable surface_var_id="0" var_id="3" surface_value="first"/>
+<!--Lon @ ID=first-->
+<IsoVariable surface_var_id="0" var_id="4" surface_value="first"/>
+</IsoSurfaceVariables>
+<CurrentSelection stationID="12" sampleID="0"/>
+</View>

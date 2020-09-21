@@ -1,0 +1,812 @@
+---
+title: "Traitement donnee 16S"
+author: "Richard LaBrie"
+date: "3/3/2020"
+output: html_document
+---
+
+```{r}
+#Install all dependancies and source them !!! Does not work on R 3.4.1
+source("http://bioconductor.org/biocLite.R") #See the website for updated version
+#BiocManager(suppressUpdates = FALSE)
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+library(BiocManager)
+BiocManager::install("ShortRead", suppressUpdates = FALSE)
+BiocManager::install("dada2", suppressUpdates = FALSE)
+
+
+
+#To remove averything in your global environment
+rm(list = ls())
+
+#BiocManager::install("devtools")
+library("devtools")
+#devtools::install_github("benjjneb/dada2")
+if(!require(snow)) install.packages("snow")
+library("snow")
+if(!require(doParallel)) install.packages("doParallel")
+library("doParallel")
+if(!require(vegan)) install.packages("vegan")
+library("vegan")
+if(!require(plotrix)) install.packages("plotrix")
+library("plotrix")
+if(!require(fields)) install.packages("fields")
+library("fields")
+if(!require(lattice)) install.packages("lattice")
+library("lattice")
+library(ShortRead); packageVersion("ShortRead")
+library(dada2); packageVersion("dada2")
+BiocManager::install("phyloseq")
+library(phyloseq); packageVersion("phyloseq")
+if(!require(ggplot2)) install.packages("ggplot2")
+library(ggplot2); packageVersion("ggplot2")
+library("extrafont")
+
+rowSd = function(matrix){
+  output = apply(matrix, 1, sd)
+  return(output)
+}
+mypalette = c("#9bbb59","#9bbb59", "#00b0f0", "#00b0f0", "#002060", "#002060")
+
+bg.graph = c("#9BBB59","#9BBB59", "#00B0F0", "#00B0F0", "#002060", "#002060")
+pch.graph = c(21, 22, 21, 22, 21, 22)
+```
+
+#Assign taxonomy Bacteria
+```{r}
+#Assign taxonomy to Bacterial Kingdom
+path <- "../RawSequence"
+list.files(path)
+# Sort ensures forward/reverse reads are in same order
+fnFs <- sort(list.files(path, pattern="_R1_002.fastq"))
+fnRs <- sort(list.files(path, pattern="_R2_002.fastq"))
+# Extract sample names, assuming filenames have format: SAMPLENAME_XXX.fastq
+sample.names <- sapply(strsplit(fnFs, "_"), `[`, 1)
+# Specify the full path to the fnFs and fnRs
+fnFs <- file.path(path, fnFs)
+fnRs <- file.path(path, fnRs)
+plotQualityProfile(fnFs[1:2])
+plotQualityProfile(fnRs[1:2])
+
+filt_path <- file.path(path, "filtered") # Place filtered files in filtered/ subdirectory
+filtFs <- file.path(filt_path, paste0(sample.names, "_F_filt.fastq.gz"))
+filtRs <- file.path(filt_path, paste0(sample.names, "_R_filt.fastq.gz"))
+
+for(i in seq_along(fnFs)) {
+  fastqPairedFilter(c(fnFs[i], fnRs[i]), c(filtFs[i], filtRs[i]),
+                    truncLen=c(270,200), 
+                    maxN=0, maxEE=c(2,2), truncQ=2, rm.phix=TRUE,
+                    compress=TRUE, verbose=TRUE)
+}
+
+errF <- learnErrors(filtFs, multithread=TRUE)
+errR <- learnErrors(filtRs, multithread=TRUE)
+plotErrors(errF, nominalQ=TRUE)
+
+derepFs <- derepFastq(filtFs, verbose=TRUE)
+derepRs <- derepFastq(filtRs, verbose=TRUE)
+# Name the derep-class objects by the sample names
+names(derepFs) <- sample.names
+names(derepRs) <- sample.names
+
+dadaFs <- dada(derepFs, err=errF, multithread=TRUE)
+dadaRs <- dada(derepRs, err=errR, multithread=TRUE)
+dadaFs[[1]]
+
+mergers <- mergePairs(dadaFs, derepFs, dadaRs, derepRs, verbose=TRUE)
+# Inspect the merger data.frame from the first sample
+head(mergers[[1]])
+
+seqtab <- makeSequenceTable(mergers)
+dim(seqtab)
+table(nchar(getSequences(seqtab)))
+
+OTU_bact <- removeBimeraDenovo(seqtab, method="consensus", multithread=TRUE, verbose=TRUE) #was seqtab_nochim
+dim(OTU_bact)
+sum(OTU_bact)/sum(seqtab)
+
+
+getN <- function(x) sum(getUniques(x))
+track <- cbind(sapply(dadaFs, getN), sapply(mergers, getN), rowSums(seqtab), rowSums(OTU_bact))
+colnames(track) <- c("denoised", "merged", "tabled", "nonchim")
+rownames(track) <- sample.names
+head(track)
+write.csv(track,file="../RawSequence/bact.track1.14.1.csv")
+#Assign taxonomy using Silva
+taxa_bact132<- assignTaxonomy(OTU_bact, "../Input/silva_nr_v132_train_set.fa.gz", multithread=F)
+unname(head(taxa_bact132))
+
+#ps_silva <- phyloseq(otu_table(OTU_bact, taxa_are_rows=FALSE), 
+#                   sample_data(samdf), 
+#                   tax_table(taxa_silva))
+```
+#Combine both datasets
+```{R}
+#CLean bacteria and archaea databases, then combine
+taxa_bact132 = as.data.frame(taxa_bact132)
+attach(taxa_bact132)
+Bact.all = OTU_bact
+for(i in 1:1728)
+{
+  colnames(Bact.all)[i] = paste(Kingdom[i],Phylum[i],Class[i],Order[i],Family[i],Genus[i],sep="_")
+}
+
+first.rem = grep(pattern = "Archa",colnames(Bact.all))
+Bact.all = Bact.all[,-c(grep(pattern = "Archa",colnames(Bact.all)))] #Removes Archaea from bact taxonomy
+second.rem = grep(pattern = "Euk",colnames(Bact.all))
+Bact.all = Bact.all[,-c(grep(pattern = "Euk",colnames(Bact.all)))] #Removes Eukaryotes from bact taxonomy
+
+taxa.bact.all = taxa_bact132
+taxa.bact.all = taxa.bact.all[-first.rem,]
+taxa.bact.all = taxa.bact.all[-second.rem,]
+
+write.csv(x = Bact.all,"../Input/Bact.all132.csv",fileEncoding = "UTF-8")
+
+write.csv(taxa.bact.all, "../Input/taxa.bact132.csv",fileEncoding = "UTF-8")
+```
+
+#Correction for 16S copy
+```{R}
+#Correction for Illumina contamination and gene copy number
+#taxa.prok.copygene.csv is created by hand in Excel using rrndb.umms.med.umich.edu
+correction.table <- read.csv("../Input/taxa.bact132.NGC.csv",row.names=1) #Read correction table with gene copy number. Separator is ";" because our Excel is in French
+Bact.table <- read.csv("../Input/Bact.all132.csv",row.names=1) #Read abundance table
+
+Bact.table.cor <- as.data.frame(t(t(Bact.table) / correction.table[,7])) #Apply copy gene number correction to abundance table
+selection = unlist(lapply(Bact.table.cor, function(x) #Select for minimal sequence of more than 10
+{
+  max(x) > 10
+}
+))
+Cor.Bact <- Bact.table.cor[selection] #Apply slection to abundance table
+Cor.copy.gene <- correction.table[selection,] #Apply selection to copy gene table
+
+write.csv(Cor.Bact, "../Input/Cor.Bact132.csv", fileEncoding = "UTF-8")
+write.csv(Cor.copy.gene, "../Input/Cor.Taxo.NGC132.csv", fileEncoding = "UTF-8")
+```
+
+```{r}
+
+##################JUAN PABLO'S SCRIPT######################################
+
+############modeling of species abundance distributions
+
+library(diptest)
+library(fitdistrplus)
+library(reshape)
+library(ggplot2)
+
+
+# Create a dataframe with statistics per OTU
+otuss.backup = read.csv("../Input/Cor.Bact132.csv", row.names = 1)
+
+#Read taxonomy table
+taxo = read.csv("../Input/Cor.Taxo.NGC132.csv", row.names = 1)
+
+#Select rows of free-living heterotrophic bacteria
+Free.OTU = otuss.backup[grep("02b",x = rownames(otuss.backup)),]
+Backup.colname = colnames(Free.OTU)
+#Remove R102b or R202b to have mathcing rownames
+rownames(Free.OTU) = substr(rownames(Free.OTU), 1,6)
+#Changer les noms de colonne pour OTUn
+colnames(Free.OTU) = paste0("OTU",seq(1,dim(otuss.backup)[2]))
+
+#Retirer les colonnes vides
+Empty.find = colSums(Free.OTU != 0)
+Empty.index = which(Empty.find == 0)
+otuss = Free.OTU[,-Empty.index]
+
+#Idem pour taxonomie
+taxo.free = taxo[-Empty.index,]
+
+#Working using otuss to avoid having only zeros
+stats_sk=matrix(0,10,ncol(otuss))
+colnames(stats_sk)=colnames(otuss)
+stats_sk<-as.data.frame(stats_sk)
+
+
+distmod<-matrix(0,6)
+newnames<-c("normal","weibull","gamma", "lnormal", "logistic", "cauchy")
+rownames(distmod)<-newnames
+row.names(stats_sk)[1]<-"min"
+row.names(stats_sk)[2]<-"max"
+row.names(stats_sk)[3]<-"median"
+row.names(stats_sk)[4]<-"mean"
+row.names(stats_sk)[5]<-"sd"
+row.names(stats_sk)[6]<-"skew"
+row.names(stats_sk)[7]<-"kurt"
+row.names(stats_sk)[8]<-"dist"
+row.names(stats_sk)[9]<-"meandist"
+row.names(stats_sk)[10]<-"sddist"
+for(i in 1:ncol(otuss)){
+  (colnames(otuss)[i])
+  m=1
+  j=1
+  print(paste("i:",i))
+  # dist=1
+  t=j+1
+  
+  #print(paste("j:",j))
+  
+  m=m+1
+  
+  #print(paste("k:",k))
+  dist=descdist(log10(otuss[,i]+5), boot = 1000, graph = FALSE)
+  diptest<-dip.test(log10(otuss[,i]+5), simulate.p.value = FALSE, B = 2000)
+  normal<-try(fitdist(log10(otuss[,i]+5), "norm"))
+  if(inherits( normal, "try-error"))
+  {
+    #error handling code, maybe just skip this iteration using
+    normal$aic=NA
+  }
+  weibull <-try(fitdist(log10(otuss[,i]+5), "weibull"))
+  if(inherits( weibull, "try-error"))
+  {
+    #error handling code, maybe just skip this iteration using
+    weibull$aic=NA
+  }
+  gamma <- try(fitdist(log10(otuss[,i]+5), "gamma"))
+  if(inherits( gamma, "try-error"))
+  {
+    #error handling code, maybe just skip this iteration using
+    gamma$aic=NA
+  }
+  lnormal <- try(fitdist(log10(otuss[,i]+5), "lnorm"))
+  if(inherits( lnormal, "try-error"))
+  {
+    #error handling code, maybe just skip this iteration using
+    lnormal$aic=NA
+  }
+  
+  logistic <- try(fitdist(log10(otuss[,i]+5), "logis"))
+  if(inherits( logistic, "try-error"))
+  {
+    #error handling code, maybe just skip this iteration using
+    logistic$aic=NA
+  }
+  cauchy <- try(fitdist(log10(otuss[,i]+5), "cauchy"))
+  if(inherits( cauchy, "try-error"))
+  {
+    #error handling code, maybe just skip this iteration using
+    cauchy$aic=NA
+  }
+  distmod[1,]= normal$aic
+  distmod[2,]= weibull$aic
+  distmod[3,]= gamma$aic
+  distmod[4,]= lnormal$aic
+  distmod[5,]= logistic$aic
+  distmod[6,]= cauchy$aic
+  AICmin = rownames(which(distmod == min(distmod, na.rm=TRUE), arr.ind=TRUE))
+  parameters<-paste(as.name(AICmin),"$estimate", sep="")
+  eval(parse(text=parameters))
+  parameters<-as.matrix(eval(parse(text=parameters)))
+  
+  m=m+1
+  #otuss.relsa[1,i]=mean(dist)
+  stats_sk[1,i]=dist$min
+  stats_sk[2,i]=dist$max
+  stats_sk[3,i]=dist$median
+  stats_sk[4,i]=dist$mean
+  stats_sk[5,i]=dist$sd
+  stats_sk[6,i]=dist$skew
+  stats_sk[7,i]=dist$kurt
+  
+  if (diptest$p.value < 0.05){
+    stats_sk[8,i]= print("bimodal")
+  } else {
+    stats_sk[8,i]=print(AICmin)
+  }
+  stats_sk[9,i]=parameters[1,1]
+  stats_sk[10,i]=parameters[2,1]
+  
+} 
+########################
+
+
+
+######MAKE DIFFERENT OTU TABLES FOR EACH SPAD CATEGORY
+str(stats_sk)
+rownames(stats_sk$min)
+
+aa<-data.frame(t(stats_sk))
+str(aa)
+
+aa$dist
+all(rownames(aa)==colnames(otuss))
+aa$dist1<-aa$dist
+aa[aa$dist=="normal"|aa$dist=="weibull"|aa$dist=="cauchy"|aa$dist=="gamma",]$dist1<-"normal"
+aa<-droplevels(aa)
+
+
+normal<-otuss[aa$dist=="normal"|aa$dist=="weibull"|aa$dist=="cauchy"|aa$dist=="gamma"]#these distributions are normal-like
+bimodal<-otuss[,aa$dist=="bimodal"]
+logistic<-otuss[,aa$dist=="logistic"]
+lognormal<-otuss[,aa$dist=="lnormal"]
+
+#Manually check the abundance distribution of individual OTUs
+{pdf("../Output/Uni/normal.pdf")
+for(i in 1:dim(normal)[2])
+{
+  hist(log10(normal[,i] +1), main = paste(colnames(normal)[i]))
+}
+dev.off()
+
+pdf("../Output/Uni/bimodal.pdf")
+for(i in 1:dim(bimodal)[2])
+{
+  hist(log10(bimodal[,i] +1), main = paste(colnames(bimodal)[i]))
+}
+dev.off()
+
+pdf("../Output/Uni/logistique.pdf")
+for(i in 1:dim(logistic)[2])
+{
+  hist(log10(logistic[,i] +1), main = paste(colnames(logistic)[i]))
+}
+dev.off()
+
+pdf("../Output/Uni/lognormal.pdf")
+for(i in 1:dim(lognormal)[2])
+{
+  hist(log10(lognormal[,i] +1), main = paste(colnames(lognormal)[i]))
+}
+dev.off()}
+
+
+{
+pdf("../Output/Fig S4a.pdf", width = 7, height = 4)
+#png("../Output/Fig S4a.png", width = 7, height = 4, units = "in", res = 300)
+  
+par(mfrow=c(2,2))
+par(mar = c(5, 5, 2, 2)+0.1)
+
+hist(log10(normal[,9]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("a", side = 3, at = 0.65)
+
+hist(log10(bimodal[,8]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("b", side = 3, at = -0.3)
+
+hist(log10(lognormal[,9]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("c", side = 3, at = -0.25)
+
+hist(log10(logistic[,1]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("d", side = 3, at = -0.1)
+dev.off()
+}
+
+
+{
+pdf("../Output/Fig S4b.pdf", width = 7, height = 3)
+#png("../Output/Fig S4b.png", width = 7, height = 3, units = "in", res = 300)
+  
+par(mfrow=c(1,3))
+
+hist(log10(lognormal[,16]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("e", side = 3, at = 0.8)
+
+hist(log10(normal[,2]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("f", side = 3, at = 0)
+
+hist(log10(normal[,28]+1),
+     main = "",
+     las = 1,
+     xlab = expression(Abundance~(log[10]+1)))
+mtext("g", side = 3, at = -0.25)
+dev.off()
+}
+
+
+#Confirmation visuelle. Certains sont mal classifies
+#Normal: ils doivent etre present partout
+NormtoBi = colnames(normal)[c(2, 4, 14, 15, 16, 21:27, 29:33, 35:43)]
+NormtoLnorm = colnames(normal)[28]
+
+#Bimodal:
+BiToLnorm = colnames(bimodal)[c(45,56)]
+
+#Lognormal: 
+LnormToNorm = colnames(lognormal)[c(4, 7, 8, 13 ,16, 18)]
+LnormToBi = colnames(lognormal[c(1,2,3,5,6, 10, 19, 21,22, 26, 31,34,36,37, 39:42, 53, 57, 59, 65, 144, 185)])
+LnormtoLogit = colnames(lognormal)[c(15,143,157,159,165,174,175,177,186,200,213)]
+
+
+#Logistique: 
+LogitToNorm = colnames(logistic)[c(2:5)]
+LogittoBi = colnames(logistic)[c(6, 7)]
+LogittoLnorm = colnames(logistic)[c(43,48)]
+
+#Creer des vecteurs associe aux differents distribution
+OTUnorm = colnames(normal)
+OTUBi = colnames(bimodal)
+OTUlnorm = colnames(lognormal)
+OTUlogit = colnames(logistic)
+
+#Appliquer le changement de categorisation
+OTUnorm = c(OTUnorm[-c(2, 4, 14, 15, 16, 21:33, 35:43)], 
+            LnormToNorm, 
+            LogitToNorm)
+
+OTUBi = c(OTUBi[-c(45,56)], 
+          NormtoBi, 
+          LnormToBi, 
+          LogittoBi)
+
+OTUlnorm = c(OTUlnorm[-c(1:8, 10, 13, 15, 16, 18, 19, 21, 22, 26, 31 ,34, 36, 37, 39:42, 53, 57, 59, 65, 143, 144, 157, 159, 165, 174, 175, 177, 185, 186, 200, 213)], 
+             NormtoLnorm, 
+             BiToLnorm, 
+             LogittoLnorm)
+
+OTUlogit = c(OTUlogit[-c(2:7,43,48)], 
+             LnormtoLogit)
+
+
+
+Distribution = vector("character", ncol(otuss))
+names(Distribution) = colnames(otuss)
+Distribution[which(names(Distribution)%in%OTUnorm == TRUE)] = "Normal"
+Distribution[which(names(Distribution)%in%OTUBi == TRUE)] = "Bimodal"
+Distribution[which(names(Distribution)%in%OTUlnorm == TRUE)] = "Lognormal"
+Distribution[which(names(Distribution)%in%OTUlogit == TRUE)] = "Logistique"
+
+#Faire les memes changements pour les tableaux d'abondances
+Normalcor = cbind(normal[,-c(2, 4, 14, 15, 16, 21:33, 35:43)], 
+                  lognormal[,c(4, 7, 8, 13 ,16, 18)], 
+                  logistic[,c(2:5)])
+
+Bimodalcor = cbind(bimodal[,-c(45,56)], 
+                   normal[,c(2, 4, 14, 15, 16, 21:27, 29:33, 35:43)],
+                   lognormal[,c(1,2,3,5,6, 10, 19, 21,22, 26, 31,34,36,37, 39:42, 53, 57, 59, 65, 144, 185)], 
+                   logistic[,c(6, 7)])
+
+Lognormalcor = cbind(lognormal[,-c(1:8, 10, 13, 15, 16, 18, 19, 21, 22, 26, 31 ,34, 36, 37, 39:42, 53, 57, 59, 65, 143, 144, 157, 159, 165, 174, 175, 177, 185, 186, 200, 213)], 
+                     bimodal[,c(45,56)], 
+                     logistic[,c(43,38)])
+
+Logitcor = cbind(logistic[,-c(2:7,43,48)],
+                 lognormal[,c(15,143,157,159,165,174,175,177,186,200,213)])
+
+#70 mal-classe sur 578 (12%)
+nn<-melt(Bimodalcor)#check the first 50 OTUs
+head(nn)
+colnames(nn)<-c("otuID","abund")
+
+########INDIVIDUAL DYNAMICS OF NORMAL OTUs
+ggplot(nn, aes(log10(abund+1)))+geom_density()+facet_wrap(~otuID,scales="free",ncol=12)+
+  theme(strip.background=element_blank())+
+  theme(panel.grid.major.y=element_blank(),panel.grid.minor.y=element_blank(),
+        panel.grid.major.x=element_blank(),panel.grid.minor.x=element_blank(),
+        axis.ticks=element_line(size=0.2),aspect.ratio=2/(1+sqrt(2)),
+        text=element_text(size=8),axis.text.y=element_text(size=8),
+        axis.title.y=element_text(margin=margin(0,20,0,0)),
+        axis.title.x=element_text(margin=margin(20,0,0,0)),
+        axis.text.x=element_text(size=8),
+        plot.title=element_text(size=9, face='bold', family="Times",
+  margin=margin(0,0,20,0)))+labs(x="Log10 Abundance",y="Density")
+
+#Tout semble OK
+write.csv(Distribution,"../Input/SPAD.Vec.csv", fileEncoding = "UTF-8")
+write.csv(otuss, "../Input/WorkingASV132.csv", fileEncoding = "UTF-8")
+write.csv(taxo.free, "../Input/WorkingTaxo132.csv", fileEncoding = "UTF-8")
+
+```
+
+#Remove Cyanos and correct abundances using flow cytometry.
+```{R}
+#Read OTU abundance table
+WorkingOTUTransect = read.csv("../Input/WorkingASV132.csv", header=T, row.names=1)
+colname.otu.backup <- colnames(WorkingOTUTransect)
+
+#Read taxonomy table
+WorkingTaxoTransect = read.csv("../Input/WorkingTaxo132.csv", header=T, row.names = 1)
+#Save colnames
+col.temp = colnames(WorkingTaxoTransect)
+
+#Read flow cytometry abundances
+BA <- read.csv("../Input/BA.csv", sep = ";", header=T, row.names=1)
+
+#Read SpAD data
+SPAD <- read.csv("../Input/SPAD.vec.csv")
+
+#Find cyanos and remove them
+Chloro = which(WorkingTaxoTransect$Phylum == "Cyanobacteria")
+SPAD.hetero = as.data.frame(SPAD[-Chloro,])
+SPAD.names = SPAD.hetero[,1]
+SPAD.hetero = SPAD.hetero[,-1]
+names(SPAD.hetero) = SPAD.names
+
+#Remove Cyanos from ASV table and Taxonomy table
+ASV.hetero = WorkingOTUTransect[,-Chloro]
+Taxo.hetero = WorkingTaxoTransect[-Chloro,]
+
+WorkingOTUTransect.rel = prop.table(as.matrix(ASV.hetero), 1)
+
+#Multiply the relative abundance with the real abundances
+WorkingOTUTransect.rel.cor = WorkingOTUTransect.rel
+for(i in 1:dim(WorkingOTUTransect.rel)[1])
+{
+  #Temporary item to match the rownames between matrices
+  row.temp = substr(rownames(WorkingOTUTransect.rel)[i],1,6)
+  
+  #Change abundance for bacteria
+  WorkingOTUTransect.rel.cor[i,] = WorkingOTUTransect.rel[i,] * BA[which(rownames(BA)==row.temp),1]
+}
+
+#Export corrected data
+write.csv(x = WorkingOTUTransect.rel.cor, file = "../Input/WorkingASV132.cor.csv", row.names = T, fileEncoding = "UTF-8")
+
+write.csv(x = SPAD.hetero, file = "../Input/SPAD.hetero.vec.csv", row.names = T, fileEncoding = "UTF-8")
+
+write.csv(x = Taxo.hetero, file = "../Input/WorkingTaxo132.hetero.csv", row.names = T, fileEncoding = "UTF-8")
+
+```
+
+#ASV indices
+```{r}
+library(vegan)
+library(diptest)
+library(fitdistrplus)
+library(lmodel2)
+
+log_tick_marks <- function(min,max){
+  nsplit <- abs(round(log10(max-min)))
+  i <- 0
+  nurange <- c()
+  while(i<=nsplit) {
+    nurange <- c(nurange,sapply(1:10,function(x) x*(10^i)))
+    i <- i+1;
+  }
+  nurange
+}
+
+#Read abundance table
+Free.OTU.hetero = read.csv("../Input/WorkingASV132.cor.csv", row.names = 1)
+
+#Read taxonomy table
+WorkingTaxoTransect = read.csv("../Input/WorkingTaxo132.hetero.csv", header=T, row.names = 1)
+
+Metadata = read.csv("../Input/samdf_bact_transect.csv", header=T, sep=";")
+
+#Creer un vecteur de richesse specifique (nombre d'OTU)
+Richness = rowSums(Free.OTU.hetero > 0)
+
+#Creer un vecteur d'espece endemique
+Endem.find = colSums(Free.OTU.hetero != 0)
+Endem.index = which(Endem.find == 1)
+Endemique.store = vector(mode = "integer", length = length(Endem.index))
+Endemic = vector(mode = "integer", length = dim(Free.OTU.hetero)[1])
+for(i in 1:length(Endem.index)){
+  Endemique.store[i] = which(Free.OTU.hetero[,Endem.index[i]] == max(Free.OTU.hetero[,Endem.index[i]]))
+}
+for(i in 1:length(Endemic)){
+  Endemic[i] = length(which(Endemique.store == i))
+}
+NonEndeRich = Richness - Endemic
+
+#Creer un vecteur d'abondance totale
+Abundance = rowSums(Free.OTU.hetero)
+
+#Indice de Shannon et Simpson
+Shannon = diversity(Free.OTU.hetero,index = "shannon") 
+Simpson = diversity(Free.OTU.hetero,index = "simpson") #"Equitabilite"
+
+#Charger les SPAD
+SPAD.hetero = read.csv("../Input/SPAD.hetero.vec.csv", row.names=1)
+
+
+#Verifier les numero d'OTU
+unique(rownames(SPAD.hetero) == colnames(Free.OTU.hetero))
+colnames(SPAD.hetero) = "Distribution"
+
+#Verifier si les abondances des lognormal et logistique covarient
+Model2 <- lmodel2(rowSums(log10(Free.OTU.hetero[, SPAD.hetero == "Lognormal"]+1))~
+                  rowSums(log10(Free.OTU.hetero[, SPAD.hetero == "Logistique"]+1)), nperm=99) 
+
+#Parametre graphique
+#Couleur
+bg.indice.col = as.character(Metadata[which(Metadata$Living == "free"),"Year"])
+bg.indice.col[bg.indice.col == "2014"] = "#C7144C" #Rouge
+bg.indice.col[bg.indice.col == "2015"] = "#33a02c" #Vert
+bg.indice.col[bg.indice.col == "2016"] = "#FFD700" #Jaune
+
+#pch
+pch.indice = as.character(Metadata[which(Metadata$Living == "free"),"Watermass"])
+pch.indice[pch.indice == "LSS"] = 21
+pch.indice[pch.indice == "CLB"] = 22
+pch.indice[pch.indice == "GSS"] = 24
+pch.indice = as.numeric(pch.indice)
+
+{
+#pdf("./Graphique/Exploration/Temp/Fig S3.pdf")
+png("../Output/Fig S3.png")
+plot(Model2, method = "MA",
+     las = 1,
+     xlab = "Log10 Logistic abundance",
+     ylab = "Log10 Lognormal abundance",
+     main = "Model Type II regression",
+     pch = pch.indice,
+     bg = bg.indice.col ,
+     cex = 1.2)
+legend("bottomright",
+       paste(c("2014", "2015", "2016", "LS", "CB", "GS")),
+       pt.bg = c("#C7144C", "#33a02c", "#FFD700", "#FFFFFF", "#FFFFFF", "#FFFFFF"),
+       pch = c(21, 21, 21, 21, 22, 24),
+       cex = 1)
+text(x = 12, y = 200, paste0("R² = ", round(Model2$rsquare,2)))
+text(x = 15, y = 180, expression("p-value < 0.01"))
+dev.off()}
+
+
+#La relation est bonne, considerer les deux distributions ensemble comme logistique
+SPAD.hetero$Distribution = as.character(SPAD.hetero$Distribution)
+SPAD.hetero$Distribution[SPAD.hetero$Distribution == "Lognormal"] <- "Logistique"
+SPAD.hetero$Distribution = as.factor(SPAD.hetero$Distribution)
+
+#Empecher la notation scientifique dans le graphique
+options(scipen=0)
+abond.bi = rowSums(Free.OTU.hetero[, SPAD.hetero == "Bimodal"])/1000
+abond.norm = rowSums(Free.OTU.hetero[, SPAD.hetero == "Normal"])/1000
+abond.logit = rowSums(Free.OTU.hetero[, SPAD.hetero == "Logistique"])/1000
+Abund.g = Abundance / 1000000
+#Graphique entre les differents indices de caracterisation des OTUs
+{
+png("../Output/Fig S5.png",    width = 9, height = 10, units = "in", res = 300)
+#pdf("./Graphique/Exploration/Temp/Fig S5.pdf", width = 9, height = 10)
+par(mfrow = c(4,3))
+par(mar = c(3.5, 7.3, 2, 2)+0.1)
+
+plot(abond.norm, Abund.g, las = 1,
+     xlab = "",
+     xlim = c(100,900),
+     main = "Normal-like",
+     ylab = "",
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+mtext(text = expression(Prokaryotic),
+      side = 2,
+      line = 5.5,
+      cex = 1)
+mtext(text = expression(abundance~(10^6~ml^-1)),
+      side = 2,
+      line = 3.5,
+      cex = 1)
+
+plot(abond.bi, Abund.g, las = 1,
+     xlab = "",
+     xlim = c(48,275),
+     main = "Bimodal",
+     ylab = "",
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+
+plot(abond.logit, Abund.g, las = 1,
+     xlab = "",
+     xlim = c(5,70),
+     main = "Logistic",
+     ylab = "",
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+
+
+plot(abond.norm, Richness, las = 1, ylab = "", xlab = "",
+     xlim = c(100,900),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+mtext(text = expression(Richness),
+      side = 2,
+      line = 3.5,
+      cex = 1)
+plot(abond.bi, Richness, las = 1, ylab = "", xlab = "",
+     xlim = c(48,275),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+plot(abond.logit, Richness, las = 1, ylab = "", xlab = "",
+     xlim = c(5,70),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+
+plot(abond.norm, Endemic, las = 1, ylab = "",xlab = "",
+     xlim = c(100,900),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+mtext(text = expression(Endemic),
+      side = 2,
+      line = 3.5,
+      cex = 1)
+plot(abond.bi, Endemic, las = 1, ylab = "",xlab = "",
+     xlim = c(48,275),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+plot(abond.logit, Endemic, las = 1, ylab = "",xlab = "",
+     xlim = c(5,70),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+
+plot(abond.norm, Shannon, las = 1, ylab = "",xlab = "",
+     xlim = c(100,900),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+mtext(text = expression(Shannon),
+      side = 2,
+      line = 3.5,
+      cex = 1)
+mtext(text = expression(Normal-like~abundance~(10^3~ml^-1)),
+      side = 1,
+      line = 2.8,
+      cex = 1)
+plot(abond.bi, Shannon, las = 1, ylab = "",xlab = "",
+     xlim = c(48,275),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+mtext(text = expression(Bimodal~abundance~(10^3~ml^-1)),
+      side = 1,
+      line = 2.8,
+      cex = 1)
+
+plot(abond.logit, Shannon, las = 1, ylab = "",xlab = "",
+     xlim = c(5,70),
+     pch = pch.indice, bg = bg.indice.col, cex = 1.5)
+mtext(text = expression(Logistic~abundance~(10^3~ml^-1)),
+      side = 1,
+      line = 2.8,
+      cex = 1)
+dev.off()
+}
+
+Indice.OTU.hetero = cbind(abond.norm=abond.norm*1000, abond.bi=abond.bi*1000, abond.logit=abond.logit*1000, Richness,
+                   NonEndeRich, Endemic, Abundance, Shannon, Simpson)
+write.csv(Indice.OTU.hetero, "../Input/Indice.ASV.hetero132.csv", fileEncoding = "UTF-8")
+```
+
+#Dominance and sub-dominance
+```{r}
+# Author Nicolas Fortin St-Gelais
+# where m=community matrix (cols = taxa, rows = sites)
+# c= a vertor with the selected taxonomic level for agregation and OTU as name
+# colnames(m) and names(c) must be identical and unique
+mergeByCat<- function(m,c){
+  c=c[!is.na(c)]
+  c=c[names(c)%in%colnames(m)]
+  m=m[,names(c)]
+  mergedM=matrix(NA,nrow(m),length(unique(c)),dimnames=list(rownames(m),unique(c)))
+  for(i in unique(c)){
+    mergedM[,i]=rowSums(m[,c%in%as.character(i),drop=F])}
+  return(mergedM)
+}
+
+Free.OTU.hetero = read.csv("../Input/WorkingASV132.cor.csv", row.names = 1)
+WorkingTaxoTransect.free.hetero = read.csv("../Input/WorkingTaxo132.hetero.csv", header=T, row.names = 1)
+WorkingTaxoTransect.free.hetero = cbind(1,WorkingTaxoTransect.free.hetero)
+WorkingTaxoTransect.free.hetero[,1] = paste0("ASV",seq(1, length(WorkingTaxoTransect.free.hetero[,1]),1))
+
+#Create a workable matrix name and change colnames to match Taxonomy table
+m.BA = Free.OTU.hetero
+colnames(m.BA) = WorkingTaxoTransect.free.hetero[,1]
+
+class.BA = WorkingTaxoTransect.free.hetero[,"Class"]
+names(class.BA) = WorkingTaxoTransect.free.hetero[,1]
+
+class.OTU.BA = mergeByCat(m.BA, class.BA)
+
+{pdf("../Output/Fig S5.pdf", width = 8, height = 6)
+  #png("../Output/Fig S5.png", width = 8, height = 6, units = "in", res=300)
+par(mar = c(4,5,2,2) +0.1)
+barplot(t(class.OTU.BA),
+        col = as.numeric(as.factor(colnames(class.OTU.BA)))+1,
+        las = 1,
+        xaxt="n",
+        ann=FALSE)
+mtext("Sites", side = 1, line = 2.5, cex = 1.5)
+mtext("Abundance", side = 2, line = 3.7, cex = 1.5)
+abline(v = 10.9, lty=2)
+abline(v = 19.3, lty=2)
+dev.off()}
+
+```
